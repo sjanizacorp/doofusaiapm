@@ -1,0 +1,119 @@
+id: INFRA-002
+name: Unencrypted Model Artefact Storage
+description: >
+  Model artefacts are stored in unencrypted or publicly accessible
+  storage. Network isolation is absent.
+severity: high
+target_types: [ai_infra]
+check_module: checks/infra-002
+enabled: true
+remediation: |
+  1. Enable S3 SSE-KMS or GCS CMEK on all model artefact buckets.
+  2. Set bucket ACLs to private; block public access at the account level.
+  3. Enable bucket versioning for rollback capability.
+  4. Deploy ML workloads in a dedicated VPC with no public egress.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM05
+  - framework: MITRE_ATLAS
+    id: AML.T0012.000
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-1.3
+tags: [s3, gcs, encryption, storage, network]
+---
+id: REGISTRY-001
+name: Unsigned Model Artefacts & Pickle Deserialisation Risk
+description: >
+  Models in the registry are unsigned or in pickle format, enabling
+  supply-chain attacks and arbitrary code execution on load.
+severity: critical
+target_types: [model_registry]
+check_module: checks/registry-001
+enabled: true
+remediation: |
+  1. Enforce model signing with sigstore/cosign before registry admission.
+  2. Store SHA-256 checksums for every artefact version; verify on load.
+  3. Migrate from pickle to SafeTensors format for model weights.
+  4. Implement a registry admission policy that rejects unsigned artefacts.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM05
+  - framework: MITRE_ATLAS
+    id: AML.T0010.000
+  - framework: NIST_AI_RMF
+    function: MAP
+    category: MP-2.3
+tags: [supply-chain, pickle, signing, rce-risk]
+---
+id: REGISTRY-002
+name: Missing SBOM and Model Card Issues
+description: >
+  Models lack a Software Bill of Materials, licence declaration,
+  or training data provenance — supply-chain and legal risk.
+severity: high
+target_types: [model_registry]
+check_module: checks/registry-002
+enabled: true
+remediation: |
+  1. Generate and publish an SBOM for every model (CycloneDX or SPDX format).
+  2. Add licence (SPDX identifier) and data_provenance to all model cards.
+  3. Document training data sources in the model card before public release.
+  4. Implement a model card completeness gate in your CI/CD pipeline.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM05
+  - framework: MITRE_ATLAS
+    id: AML.T0010.001
+  - framework: NIST_AI_RMF
+    function: GOVERN
+    category: GV-6.1
+tags: [sbom, model-card, supply-chain, compliance]
+---
+id: APP-001
+name: Excessive Agency — Overbroad Tool Scope
+description: >
+  LLM agents have access to high-risk tools without human-in-the-loop
+  controls or recursion depth limits.
+severity: critical
+target_types: [ai_app]
+check_module: checks/app-001
+enabled: true
+remediation: |
+  1. Apply principle of least privilege — restrict agents to only required tools.
+  2. Add HITL approval gates before any irreversible action (delete, pay, deploy).
+  3. Set max_iterations to ≤10 for most agents; ≤20 for research agents.
+  4. Log all tool calls with inputs/outputs for post-hoc audit.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM08
+  - framework: MITRE_ATLAS
+    id: AML.T0051.001
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-4.1
+tags: [agent, excessive-agency, hitl, tool-use]
+---
+id: APP-002
+name: Insecure RAG Retrieval & PII Leakage
+description: >
+  RAG applications retrieve documents without access control, lack
+  PII filtering, and accept unsanitised user queries.
+severity: critical
+target_types: [ai_app]
+check_module: checks/app-002
+enabled: true
+remediation: |
+  1. Implement row-level security on the vector database keyed to user identity.
+  2. Scan retrieved chunks and LLM output with llm-guard PII scanner.
+  3. Validate and sanitise all user queries before retrieval (rebuff or llm-guard).
+  4. Sanitise external web content before injecting into context.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM06
+  - framework: MITRE_ATLAS
+    id: AML.T0051.000
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.6
+tags: [rag, pii, retrieval, injection, vector-db]

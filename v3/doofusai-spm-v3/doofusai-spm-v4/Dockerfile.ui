@@ -1,0 +1,20 @@
+# ── DoofusAI SPM — UI (Vite dev server) ───────────────────────────────────────
+# Runs the Vite development server inside Docker.
+# For production deployments, build with `vite build` and serve the dist/
+# directory from any static host or nginx instead.
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY ui/package.json ./
+RUN npm install --silent
+
+COPY ui/ ./
+
+EXPOSE 5173
+
+ENV VITE_API_URL=http://localhost:3001
+
+# Bind to 0.0.0.0 so the port is reachable from outside the container
+CMD ["npx", "vite", "--host", "0.0.0.0"]

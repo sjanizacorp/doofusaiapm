@@ -1,0 +1,10 @@
+node_modules/
+ui/node_modules/
+data/
+.env
+.git/
+.DS_Store
+*.db
+dist/
+engine/custom-policies/*.yaml
+engine/custom-policies/*.json

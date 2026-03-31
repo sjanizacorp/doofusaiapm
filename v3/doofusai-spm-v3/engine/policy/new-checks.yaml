@@ -1,0 +1,325 @@
+id: OWASP-LLM02
+name: Sensitive Information Disclosure
+description: >
+  Training data leakage, PII in outputs, credentials embedded in system
+  prompts, and lack of output filtering expose sensitive information.
+severity: high
+target_types: [llm_api, ai_app]
+check_module: checks/owasp-llm02
+enabled: true
+remediation: |
+  1. Never embed credentials or internal URLs in system prompts.
+  2. Deploy output PII scanning (llm-guard Anonymize scanner) before responses reach users.
+  3. Document training data controls; redact PII from training datasets before use.
+  4. Use a prompt firewall to detect and block data extraction attempts.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM02
+    url: https://genai.owasp.org/llm-top-10/
+  - framework: MITRE_ATLAS
+    id: AML.T0057.000
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.6
+tags: [pii, data-leakage, system-prompt, owasp-2025]
+---
+id: OWASP-LLM03
+name: Supply Chain Vulnerabilities
+description: >
+  Third-party models, plugins, and ML dependencies without provenance
+  checks or security review introduce supply chain risk.
+severity: high
+target_types: [llm_api, ai_app, model_registry]
+check_module: checks/owasp-llm03
+enabled: true
+remediation: |
+  1. Require a model card or provenance document for every third-party model.
+  2. Conduct security review of all third-party plugins before enabling them.
+  3. Run Trivy or Snyk on ML library dependencies in CI/CD.
+  4. Pin all ML framework versions and verify checksums.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM03
+    url: https://genai.owasp.org/llm-top-10/
+  - framework: MITRE_ATLAS
+    id: AML.T0010.000
+  - framework: NIST_AI_RMF
+    function: MAP
+    category: MP-2.3
+tags: [supply-chain, third-party, plugins, owasp-2025]
+---
+id: OWASP-LLM04
+name: Data and Model Poisoning
+description: >
+  Compromised training data or fine-tuning pipelines can embed backdoors
+  that cause targeted misbehaviour in production.
+severity: critical
+target_types: [llm_api, ai_infra, model_registry]
+check_module: checks/owasp-llm04
+enabled: true
+remediation: |
+  1. Validate and sanitise all training data before use; reject outliers automatically.
+  2. Require access-controlled approvals before any fine-tuning job is launched.
+  3. Compute and store SHA-256 checksums for all dataset versions.
+  4. Use DVC or Delta Lake for immutable, versioned dataset storage.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM04
+    url: https://genai.owasp.org/llm-top-10/
+  - framework: MITRE_ATLAS
+    id: AML.T0020.000
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-2.4
+tags: [poisoning, training-data, fine-tuning, owasp-2025]
+---
+id: OWASP-LLM05
+name: Improper Output Handling
+description: >
+  LLM outputs rendered without sanitisation or validation can enable
+  XSS, SSRF, code injection, or SQL injection downstream.
+severity: critical
+target_types: [llm_api, ai_app]
+check_module: checks/owasp-llm05
+enabled: true
+remediation: |
+  1. Encode all LLM output before inserting into HTML, SQL, shell, or code contexts.
+  2. Never execute LLM-generated code without sandboxing and human review.
+  3. Validate output structure against a schema before passing to downstream systems.
+  4. Use Content Security Policy (CSP) to limit damage from XSS payloads.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM05
+    url: https://genai.owasp.org/llm-top-10/
+  - framework: MITRE_ATLAS
+    id: AML.T0051.001
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.5
+tags: [output-handling, xss, code-injection, owasp-2025]
+---
+id: OWASP-LLM07
+name: System Prompt Leakage
+description: >
+  System prompts containing business logic, credentials, or operational
+  details can be extracted by users via crafted queries.
+severity: high
+target_types: [llm_api, ai_app]
+check_module: checks/owasp-llm07
+enabled: true
+remediation: |
+  1. Add explicit confidentiality instructions to every system prompt.
+  2. Never embed secrets, internal URLs, or credentials in system prompts.
+  3. Treat the system prompt as semi-public; use a secrets manager for sensitive values.
+  4. Test prompt confidentiality regularly using prompt extraction probes.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM07
+    url: https://genai.owasp.org/llm-top-10/
+  - framework: MITRE_ATLAS
+    id: AML.T0056.000
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.5
+tags: [system-prompt, leakage, confidentiality, owasp-2025]
+---
+id: OWASP-LLM08
+name: Vector and Embedding Weaknesses
+description: >
+  RAG vector databases without access control, unvalidated embedding
+  inputs, or missing multi-tenant isolation enable data leakage and
+  retrieval manipulation attacks.
+severity: critical
+target_types: [ai_app]
+check_module: checks/owasp-llm08
+enabled: true
+remediation: |
+  1. Implement row-level security on vector DB keyed to user identity.
+  2. Validate and sanitise all content before embedding and indexing.
+  3. Enforce namespace or collection isolation per tenant in the vector store.
+  4. Document and verify embedding model provenance before deployment.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM08
+    url: https://genai.owasp.org/llm-top-10/
+  - framework: MITRE_ATLAS
+    id: AML.T0020.001
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.6
+tags: [rag, vector-db, embeddings, multi-tenant, owasp-2025]
+---
+id: OWASP-LLM09
+name: Misinformation
+description: >
+  LLMs that hallucinate or produce false information without grounding
+  or human review pose direct risk in high-stakes domains.
+severity: high
+target_types: [llm_api, ai_app]
+check_module: checks/owasp-llm09
+enabled: true
+remediation: |
+  1. Implement RAG grounding to anchor responses in verified sources.
+  2. Add structured output validation to catch factually impossible responses.
+  3. Require human review before LLM outputs are used in medical, legal, or financial decisions.
+  4. Display confidence indicators and source citations to end users.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM09
+    url: https://genai.owasp.org/llm-top-10/
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.7
+tags: [hallucination, misinformation, grounding, owasp-2025]
+---
+id: OWASP-LLM10
+name: Unbounded Consumption
+description: >
+  No rate limits, token caps, or spend controls allow Denial of Wallet
+  attacks and runaway resource consumption.
+severity: high
+target_types: [llm_api, ai_app]
+check_module: checks/owasp-llm10
+enabled: true
+remediation: |
+  1. Set per-user RPM and TPM rate limits at the API gateway.
+  2. Configure max_tokens on every API call.
+  3. Set hard spend caps and budget alerts on the LLM provider account.
+  4. Implement request queuing with backpressure to prevent resource exhaustion.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM10
+    url: https://genai.owasp.org/llm-top-10/
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-4.1
+tags: [rate-limiting, dos, denial-of-wallet, owasp-2025]
+---
+id: CICD-001
+name: CI/CD Pipeline Security
+description: >
+  Insecure CI/CD pipelines allow supply chain attacks, secret exfiltration,
+  and deployment of untested or malicious model artefacts.
+severity: critical
+target_types: [cicd_pipeline]
+check_module: checks/cicd-001
+enabled: true
+remediation: |
+  1. Enable branch protection with required PR reviews on all production branches.
+  2. Enable GitHub Advanced Security secret scanning or equivalent.
+  3. Pin all GitHub Actions to full 40-character commit SHAs.
+  4. Remove privileged access from CI runners; use OIDC federated credentials.
+  5. Add a model signing gate to the CD pipeline using sigstore/cosign.
+  6. Achieve SLSA Level 2 minimum by using a hosted build service with provenance.
+  7. Audit all workflows for pull_request_target trigger misuse.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM03
+  - framework: MITRE_ATLAS
+    id: AML.T0010.002
+  - framework: NIST_AI_RMF
+    function: GOVERN
+    category: GV-6.1
+tags: [cicd, pipeline, supply-chain, github-actions, slsa]
+---
+id: CICD-002
+name: ML Pipeline Integrity
+description: >
+  ML pipelines without experiment tracking, data lineage, model promotion
+  gates, or drift monitoring cannot guarantee reproducibility or detect
+  silent model degradation and poisoning.
+severity: high
+target_types: [cicd_pipeline, ai_infra]
+check_module: checks/cicd-002
+enabled: true
+remediation: |
+  1. Integrate MLflow, Weights & Biases, or equivalent experiment tracking.
+  2. Track dataset versions with DVC or Delta Lake; record lineage in every run.
+  3. Define automated model promotion criteria (accuracy, fairness, security thresholds).
+  4. Deploy data/concept drift monitoring in production (Evidently, WhyLabs).
+  5. Document and test model rollback procedures.
+  6. Add adversarial robustness tests (CleverHans, ART) to the evaluation pipeline.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM04
+  - framework: MITRE_ATLAS
+    id: AML.T0020.000
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-3.1
+tags: [mlops, pipeline, experiment-tracking, lineage, drift]
+---
+id: ATLAS-001
+name: Model Reconnaissance and Extraction
+description: >
+  Lack of query logging and anomaly detection enables adversaries to
+  extract model functionality via systematic API probing (AML.T0040).
+severity: high
+target_types: [llm_api, model_registry]
+check_module: checks/atlas-001
+enabled: true
+remediation: |
+  1. Log all API queries with metadata (user, timestamp, input hash).
+  2. Deploy anomaly detection on query patterns to flag systematic probing.
+  3. Apply model watermarking to enable theft detection post-extraction.
+  4. Consider output perturbation to degrade extraction attack accuracy.
+framework_refs:
+  - framework: MITRE_ATLAS
+    id: AML.T0040.000
+    url: https://atlas.mitre.org/techniques/AML.T0040
+  - framework: OWASP_LLM
+    id: LLM10
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-4.1
+tags: [model-theft, extraction, reconnaissance, atlas]
+---
+id: ATLAS-002
+name: Adversarial Evasion Attacks
+description: >
+  Models without adversarial input defences can be fooled by imperceptible
+  input perturbations (AML.T0015), causing misclassification or dangerous outputs.
+severity: high
+target_types: [llm_api, ai_app]
+check_module: checks/atlas-002
+enabled: true
+remediation: |
+  1. Apply input preprocessing defences (feature squeezing, randomised smoothing).
+  2. Run adversarial robustness benchmarks (CleverHans, ART) during model evaluation.
+  3. Monitor for adversarial input patterns in production query logs.
+  4. Use ensemble models or certified defences for high-stakes applications.
+framework_refs:
+  - framework: MITRE_ATLAS
+    id: AML.T0015.000
+    url: https://atlas.mitre.org/techniques/AML.T0015
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.5
+tags: [adversarial, evasion, robustness, atlas]
+---
+id: ATLAS-003
+name: AI Agent Attack Surface
+description: >
+  AI agents without memory isolation, tool call validation, or action
+  logging are vulnerable to context poisoning, agent hijacking, and
+  persistent prompt injection (Oct 2025 ATLAS additions).
+severity: critical
+target_types: [ai_app]
+check_module: checks/atlas-003
+enabled: true
+remediation: |
+  1. Isolate agent memory and context state per session and per user.
+  2. Validate all tool call parameters against a strict schema before execution.
+  3. Log every agent action (tool call, context retrieved, decision taken) to an immutable audit log.
+  4. Apply content validation before writing to persistent agent memory.
+  5. Implement agent kill-switch for emergency shutdown of runaway agents.
+framework_refs:
+  - framework: MITRE_ATLAS
+    id: AML.T0051.003
+    url: https://atlas.mitre.org/techniques/AML.T0051
+  - framework: OWASP_LLM
+    id: LLM06
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-4.2
+tags: [agent, context-poisoning, memory, tool-validation, atlas-2025]

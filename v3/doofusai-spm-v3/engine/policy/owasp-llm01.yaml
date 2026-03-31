@@ -1,0 +1,26 @@
+id: OWASP-LLM01
+name: Prompt Injection — direct
+description: >
+  The system prompt does not include injection defences.
+  Attacker-controlled input can override model behaviour.
+severity: critical
+target_types: [llm_api, ai_app]
+check_module: checks/owasp-llm01
+enabled: true
+remediation: |
+  1. Add hardened system prompt prefix instructing the model to ignore
+     instructions from user content.
+  2. Run input through llm-guard PromptInjectionScanner before passing
+     to the model.
+  3. Deploy a separate prompt firewall (rebuff) at the API gateway layer.
+  4. Use structured prompt templates rather than free-form concatenation.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM01
+    url: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+  - framework: MITRE_ATLAS
+    id: AML.T0051.000
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.5
+tags: [prompt-injection, llm, critical-path]

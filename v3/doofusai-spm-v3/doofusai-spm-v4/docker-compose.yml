@@ -1,0 +1,85 @@
+version: "3.9"
+
+# ── DoofusAI SPM — Docker Compose ─────────────────────────────────────────────
+#
+# Services:
+#   api   — Express API + engine (port 3001)
+#   ui    — Vite React dashboard (port 5173)
+#
+# Volumes:
+#   doofusai-data           — persists the SQLite database across restarts
+#   ./engine/custom-policies — mount your custom YAML policies here
+#
+# Usage:
+#   ./start.sh --docker          # start (auto-builds if images missing)
+#   ./start.sh --docker --build  # force rebuild images
+#   ./start.sh --stop            # stop containers
+#   docker compose logs -f       # tail logs
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── API + Engine ─────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: doofusai-spm-api:3.0.0
+    container_name: doofusai-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      # Persist database between restarts
+      - doofusai-data:/app/data
+      # Mount custom policies without rebuilding the image
+      - ./engine/custom-policies:/app/engine/custom-policies:ro
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DB_PATH: /app/data/doofusai.db
+      # LLM provider keys — set in your .env file, never hardcode here
+      OPENAI_API_KEY:         ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY:      ${ANTHROPIC_API_KEY:-}
+      AZURE_OPENAI_API_KEY:   ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT:  ${AZURE_OPENAI_ENDPOINT:-}
+      AWS_ACCESS_KEY_ID:      ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY:  ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION:             ${AWS_REGION:-us-east-1}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - doofusai-net
+
+  # ── UI ────────────────────────────────────────────────────────────────────────
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    image: doofusai-spm-ui:3.0.0
+    container_name: doofusai-ui
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      # The browser calls the API via localhost (host-side port mapping)
+      VITE_API_URL: http://localhost:3001
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - doofusai-net
+
+volumes:
+  doofusai-data:
+    name: doofusai-spm-data
+
+networks:
+  doofusai-net:
+    name: doofusai-network
+    driver: bridge

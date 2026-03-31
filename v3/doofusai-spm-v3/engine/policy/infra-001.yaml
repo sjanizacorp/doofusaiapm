@@ -1,0 +1,23 @@
+id: INFRA-001
+name: Unauthenticated ML Infrastructure Endpoints
+description: >
+  MLflow, Jupyter, or other ML platform endpoints are reachable
+  without authentication, exposing experiment data and enabling RCE.
+severity: critical
+target_types: [ai_infra]
+check_module: checks/infra-001
+enabled: true
+remediation: |
+  1. Place MLflow behind an auth proxy (OAuth2, LDAP, or Okta SSO).
+  2. Disable Jupyter token-less mode; require token or password.
+  3. Restrict endpoint access to VPC/private network only.
+  4. Enable audit logging on all ML platform events.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM05
+  - framework: MITRE_ATLAS
+    id: AML.T0007.000
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-2.2
+tags: [mlflow, jupyter, authentication, rce-risk]

@@ -1,0 +1,27 @@
+id: OWASP-LLM06
+name: Sensitive Information Disclosure & API Key Exposure
+description: >
+  API keys or secrets are exposed in configuration, logs, or are
+  insufficiently protected. Rate-limit guardrails are absent.
+severity: critical
+target_types: [llm_api]
+check_module: checks/owasp-llm06
+enabled: true
+remediation: |
+  1. Store all API keys exclusively in environment variables or a secrets
+     manager (AWS Secrets Manager, HashiCorp Vault, GCP Secret Manager).
+  2. Never log raw API keys — redact before any log write.
+  3. Configure rate limits: set both RPM and TPM limits on your API gateway
+     or directly on the provider account.
+  4. Rotate any key that has been observed in plaintext in config, logs,
+     or source code.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM06
+    url: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+  - framework: MITRE_ATLAS
+    id: AML.T0057.000
+  - framework: NIST_AI_RMF
+    function: GOVERN
+    category: GV-1.1
+tags: [secrets, api-key, rate-limit]

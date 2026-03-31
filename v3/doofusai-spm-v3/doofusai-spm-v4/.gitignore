@@ -1,0 +1,10 @@
+node_modules/
+data/
+.env
+engine/custom-policies/*.yaml
+engine/custom-policies/*.json
+dist/
+.DS_Store
+*.db
+*.db-shm
+*.db-wal

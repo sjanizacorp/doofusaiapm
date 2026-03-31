@@ -1,0 +1,9 @@
+{
+  "name": "doofusai-spm-api",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node ../node_modules/.bin/node server.js",
+    "dev": "node --watch server.js"
+  }
+}

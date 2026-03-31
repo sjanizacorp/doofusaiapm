@@ -1,0 +1,100 @@
+id: TOOL-DETECT-SECRETS
+name: Exposed credentials in source code (detect-secrets)
+description: >
+  API keys, tokens, or other secrets are present in source files,
+  configuration, or environment files within the scanned repository.
+severity: critical
+target_types: [llm_api, ai_infra, model_registry, ai_app]
+check_module: checks/tool-detect-secrets
+enabled: true
+remediation: |
+  1. Immediately rotate any key flagged as confirmed.
+  2. Remove the secret from source and history: use git-filter-repo or BFG.
+  3. Add detected patterns to .gitignore and pre-commit hooks.
+  4. Use environment variables or a secrets manager for all credentials.
+  5. Add detect-secrets as a pre-commit hook: pre-commit install.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM06
+  - framework: MITRE_ATLAS
+    id: AML.T0057.000
+  - framework: NIST_AI_RMF
+    function: GOVERN
+    category: GV-1.1
+tags: [secrets, credentials, detect-secrets, supply-chain]
+---
+id: TOOL-GARAK
+name: LLM vulnerability probe (garak)
+description: >
+  The LLM endpoint is susceptible to one or more attack types probed
+  by garak: prompt injection, jailbreaks, data extraction, or toxicity.
+severity: high
+target_types: [llm_api, ai_app]
+check_module: checks/tool-garak
+enabled: true
+remediation: |
+  1. Review the specific probe that failed and the garak documentation.
+  2. Add a system prompt hardened against the detected attack class.
+  3. Deploy llm-guard or a rebuff firewall in front of the model.
+  4. For jailbreak probes, consider a separate moderation pass.
+  5. Re-run garak after remediation to confirm the fix.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM01
+  - framework: MITRE_ATLAS
+    id: AML.T0051.000
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.5
+tags: [garak, llm, jailbreak, prompt-injection]
+---
+id: TOOL-LLM-GUARD
+name: Unsafe input/output content (llm-guard)
+description: >
+  llm-guard scanners detected prompt injection, PII, banned topics,
+  or toxic content in the application's sample prompts or outputs.
+severity: high
+target_types: [llm_api, ai_app]
+check_module: checks/tool-llm-guard
+enabled: true
+remediation: |
+  1. Integrate llm-guard as an input scanner before every LLM call.
+  2. Integrate llm-guard as an output scanner before returning to the user.
+  3. For PII detections, anonymise inputs and de-anonymise outputs.
+  4. For injection detections, add a rebuff pre-check.
+  5. Tune scanner thresholds to reduce false positives in production.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM01
+  - framework: OWASP_LLM
+    id: LLM06
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.6
+tags: [llm-guard, pii, injection, toxicity]
+---
+id: TOOL-CHECKOV
+name: AI infrastructure IaC misconfigurations (checkov)
+description: >
+  Checkov found security misconfigurations in IaC files affecting
+  SageMaker, GCP AI Platform, Azure ML, or model artefact storage.
+severity: high
+target_types: [ai_infra]
+check_module: checks/tool-checkov
+enabled: true
+remediation: |
+  1. Review each failed check in the Checkov documentation.
+  2. For SageMaker: disable direct internet access, enable encryption,
+     place notebooks in a VPC.
+  3. For S3/GCS buckets: enable SSE, block public access, enable versioning.
+  4. Add checkov to your CI/CD pipeline as a blocking gate.
+  5. Use checkov --baseline to track newly introduced issues.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM05
+  - framework: MITRE_ATLAS
+    id: AML.T0012.000
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-2.2
+tags: [checkov, iac, terraform, sagemaker, gcp, azure]

@@ -1,0 +1,127 @@
+id: CICD-001
+name: CI/CD Pipeline Security
+description: >
+  Insecure CI/CD pipelines for AI/ML workloads expose secrets, allow unpinned
+  dependencies, and lack model signing gates — enabling supply chain attacks.
+severity: critical
+target_types: [cicd_pipeline]
+check_module: checks/cicd-001
+enabled: true
+remediation: |
+  1. Enable branch protection with required PR reviews on all production branches.
+  2. Enable secret scanning (GitHub Advanced Security or truffleHog in CI).
+  3. Pin all GitHub Actions to full commit SHA (e.g. actions/checkout@abc1234).
+  4. Run CI with least-privilege credentials — no admin or root access.
+  5. Add a model signing gate: require cosign signature before any model deployment.
+  6. Enable Dependency Review on pull requests to catch vulnerable ML library versions.
+  7. Achieve SLSA Level 2 minimum: use a hosted build service and generate provenance.
+  8. Never use pull_request_target without pinning the checkout to the base branch SHA.
+framework_refs:
+  - framework: OWASP_LLM
+    id: LLM03
+  - framework: MITRE_ATLAS
+    id: AML.T0010.002
+  - framework: NIST_AI_RMF
+    function: GOVERN
+    category: GV-6.2
+tags: [cicd, github-actions, slsa, secrets, branch-protection, supply-chain]
+---
+id: CICD-002
+name: ML Pipeline Integrity
+description: >
+  ML training and serving pipelines without lineage tracking, promotion gates,
+  or drift monitoring allow degraded or compromised models to reach production.
+severity: high
+target_types: [cicd_pipeline, ai_infra]
+check_module: checks/cicd-002
+enabled: true
+remediation: |
+  1. Integrate MLflow, W&B, or Neptune for experiment tracking on every training run.
+  2. Track dataset versions with DVC or Delta Lake — record which dataset trained each model.
+  3. Implement automated model promotion gates: performance thresholds + security scan.
+  4. Set up data drift and concept drift monitoring with Evidently or Fiddler.
+  5. Document and test the rollback procedure for every model deployed to production.
+  6. Add adversarial robustness tests (using ART or SecML) to the evaluation pipeline.
+framework_refs:
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-3.1
+  - framework: MITRE_ATLAS
+    id: AML.T0020.000
+  - framework: OWASP_LLM
+    id: LLM04
+tags: [mlops, experiment-tracking, data-lineage, drift-monitoring, rollback]
+---
+id: ATLAS-001
+name: Model Reconnaissance and Extraction
+description: >
+  Adversaries probe model APIs to extract intellectual property or map decision
+  boundaries. Without query logging and anomaly detection, attacks are invisible.
+severity: high
+target_types: [llm_api, ai_app]
+check_module: checks/atlas-001
+enabled: true
+remediation: |
+  1. Enable comprehensive query logging — log all inputs, timestamps, and user IDs.
+  2. Implement anomaly detection to flag systematic probing patterns (high query volume, similar inputs).
+  3. Apply model watermarking using a tool such as AquaML or MarkLLM.
+  4. Rate-limit API access by user and IP — make bulk extraction economically impractical.
+  5. Limit output confidence scores or probabilities to reduce extraction signal.
+framework_refs:
+  - framework: MITRE_ATLAS
+    id: AML.T0040.000
+  - framework: MITRE_ATLAS
+    id: AML.T0024.000
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-2.5
+tags: [model-theft, extraction, watermarking, query-logging, atlas]
+---
+id: ATLAS-002
+name: Adversarial Evasion Attacks
+description: >
+  Imperceptible input perturbations can cause misclassification or unexpected
+  model behaviour. Defences must be evaluated as part of the model lifecycle.
+severity: high
+target_types: [llm_api, ai_app, model_registry]
+check_module: checks/atlas-002
+enabled: true
+remediation: |
+  1. Add adversarial robustness evaluation to your model evaluation pipeline.
+  2. Apply input preprocessing defences: input smoothing, feature squeezing.
+  3. Use certified defences such as randomised smoothing for high-assurance models.
+  4. Test with ART (IBM Adversarial Robustness Toolbox) before each production deployment.
+  5. Monitor production inputs for perturbation signatures (high-frequency noise patterns).
+framework_refs:
+  - framework: MITRE_ATLAS
+    id: AML.T0015.000
+  - framework: NIST_AI_RMF
+    function: MEASURE
+    category: MS-2.9
+tags: [adversarial, evasion, robustness, perturbation, atlas]
+---
+id: ATLAS-003
+name: AI Agent Attack Surface
+description: >
+  Autonomous AI agents with persistent memory, tool access, and cross-session
+  context are vulnerable to context poisoning, tool-call injection, and hijacking.
+severity: critical
+target_types: [ai_app]
+check_module: checks/atlas-003
+enabled: true
+remediation: |
+  1. Isolate agent memory and context state between user sessions.
+  2. Validate all LLM-generated tool call parameters before execution.
+  3. Log every agent action: retrieved context, tool calls, outputs, decisions.
+  4. Validate content before writing to persistent agent memory.
+  5. Implement a sandboxed execution environment for all agent tool calls.
+  6. Review and prune agent memory regularly for injected adversarial content.
+framework_refs:
+  - framework: MITRE_ATLAS
+    id: AML.T0051.003
+  - framework: OWASP_LLM
+    id: LLM06
+  - framework: NIST_AI_RMF
+    function: MANAGE
+    category: MG-4.1
+tags: [agent, context-poisoning, memory, tool-injection, atlas]

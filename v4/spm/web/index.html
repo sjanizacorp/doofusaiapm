@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DoofusAI SPM · Aniza Inc</title>
+<link rel="stylesheet" href="/style.css">
+<script defer src="/app.js"></script>
+</head>
+<body>
+<header><div><strong>DoofusAI</strong> <span>Security Posture Management</span></div><button id="logout" hidden>Sign out</button></header>
+<main>
+<section id="login" class="panel intro">
+<h1>Open your project</h1>
+<p>Enter a project credential issued by your administrator.</p>
+<form id="session"><label for="token">Access token</label><input id="token" type="password" required autocomplete="off"><button>Connect</button></form>
+<div id="enterprise-login" hidden>
+<button id="start-device">Sign in with your organization</button>
+<div id="device-challenge" hidden>
+<p>Open your organization’s sign-in page and confirm this code before approving access.</p>
+<p><strong id="device-code"></strong></p>
+<p><a id="device-link" target="_blank" rel="noopener noreferrer">Open organization sign-in</a></p>
+<button id="cancel-device">Cancel sign-in</button>
+</div>
+</div>
+</section>
+<section id="workspace" hidden>
+<h1 id="project"></h1><p id="identity"></p>
+<nav aria-label="Workspace"><button data-view="inventory">Inventory</button><button data-view="issues">Issues</button><button data-view="history">Scan history</button><button data-view="relationships">Relationships</button><button data-view="boms">AI bills of materials</button><button data-view="runtime">Runtime findings</button><button data-view="syncs">Cloud syncs</button><button id="agents-tab" data-view="agents" hidden>Agents</button><button id="data-posture-tab" data-view="data-posture" hidden>Data posture</button><button id="access-tab" data-view="access-reviews">Access reviews</button><button id="audit-tab" data-view="audit">Audit log</button><button data-view="api">API console</button></nav>
+<section id="inventory" class="panel view">
+<h2>Asset inventory</h2><p>Checks evaluate the facts entered here. Missing facts appear as unknown.</p>
+<form id="asset" hidden>
+<div class="fields"><label>Asset ID<input id="asset-id" required maxlength="80" placeholder="e.g. training-store"></label>
+<label>Kind<select id="kind"><option value="storage">Model storage</option><option value="registry">Model registry</option><option value="agent">AI agent</option></select></label></div>
+<div id="facts" class="fields"></div><button>Save asset</button>
+</form>
+<div id="asset-list"></div>
+</section>
+<section id="issues" class="panel view" hidden>
+<h2>Issues</h2><p>Reassess an asset after correcting its configuration to verify resolution.</p>
+<form id="issue-filter"><label>Status<select id="issue-status"><option value="open">Open</option><option value="resolved">Resolved</option></select></label><button>Apply filter</button></form>
+<div id="issue-list"></div><div id="issue-history"></div>
+</section>
+<section id="history" class="panel view" hidden><h2>Scan history</h2><div id="scan-list"></div><div id="report"></div></section>
+<section id="syncs" class="panel view" hidden><h2>Cloud syncs</h2><p>Run the host connector to refresh Cloud Storage evidence.</p><div id="sync-list"></div></section>
+<section id="relationships" class="panel view" hidden><h2>Relationships</h2><h3>Declared inventory</h3><div id="graph-list"></div>
+<div id="cloud-graph" hidden><h3>Discovered inventory</h3><label>Cloud scope<select id="cloud-scope"></select></label><div id="cloud-list"></div></div></section>
+<section id="boms" class="panel view" hidden><h2>AI bills of materials</h2><div id="bom-list"></div><div id="bom-detail"></div></section>
+<section id="runtime" class="panel view" hidden><h2>Runtime findings</h2><div id="runtime-list"></div></section>
+<section id="access-reviews" class="panel view" hidden><h2>Access reviews</h2><div id="access-list"></div><div id="access-detail"></div></section>
+<section id="agents" class="panel view" hidden>
+<h2>Collection agents</h2>
+<form id="agent-enroll">
+<label>Name<input id="agent-name" required maxlength="80"></label>
+<label>Platform<select id="agent-provider">
+<option value="aws">AWS</option><option value="gcs">Google Cloud Storage</option><option value="vertex">Google Vertex AI</option>
+<option value="azure">Azure Machine Learning</option><option value="oci">Oracle Cloud</option><option value="ibm">IBM Cloud</option>
+<option value="salesforce">Salesforce</option><option value="vsphere">VMware ESXi/vCenter</option>
+</select></label>
+<label>Target arguments <small id="agent-target-help"></small><input id="agent-target" required maxlength="1000"></label>
+<label>Credential lifetime in hours<input id="agent-ttl" type="number" value="24" min="1" max="720" required></label>
+<button>Enroll agent</button>
+</form>
+<p><button id="agent-package" type="button">Download collector bundle</button></p>
+<div id="agent-secret" hidden>
+<label>Agent credential<input id="agent-token" type="password" readonly autocomplete="off"></label>
+<button id="agent-copy" type="button">Copy credential</button><button id="agent-hide" type="button">Clear credential</button>
+<p>Start the bundle on the platform host using this credential and the central HTTPS origin.</p>
+</div>
+<div id="agent-list"></div><div id="agent-jobs"></div>
+</section>
+<section id="data-posture" class="panel view" hidden>
+<h2>Data posture</h2><div id="data-posture-list"></div><div id="data-posture-detail"></div>
+</section>
+<section id="audit" class="panel view" hidden><h2>Project audit log</h2><div id="events"></div></section>
+<section id="api" class="panel view" hidden>
+<h2>API console</h2><p>Requests use your current project credential.</p>
+<form id="api-form"><label>Endpoint<select id="endpoint"><option>/api/v1/me</option><option>/api/v1/assets</option><option>/api/v1/scans</option><option>/api/v1/issues</option><option>/api/v1/audit</option></select></label><button>Send GET request</button></form>
+<pre id="response" hidden></pre>
+</section>
+</section>
+<p id="status" role="status" aria-live="polite"></p>
+</main>
+<footer>Authored by Aniza Inc</footer>
+</body>
+</html>

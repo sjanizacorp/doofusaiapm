@@ -1,0 +1,24 @@
+[Unit]
+Description=DoofusAI SPM (Aniza Inc)
+After=network.target
+
+[Service]
+Type=simple
+User=doofusai
+Group=doofusai
+WorkingDirectory=/opt/doofusai/spm
+StateDirectory=doofusai
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/doofusai/spm/app.py --db /var/lib/doofusai/posture.sqlite serve
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

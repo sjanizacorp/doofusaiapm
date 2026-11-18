@@ -1,0 +1,16 @@
+[Unit]
+Description=DoofusAI recurring prefix classification for %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=doofusai
+Group=doofusai
+WorkingDirectory=/opt/doofusai
+EnvironmentFile=/etc/doofusai/classify-%i.conf
+ExecStart=/usr/bin/python3 /opt/doofusai/app.py --db ${SPM_CLASSIFY_DB} classify-prefix ${SPM_CLASSIFY_PROJECT} ${SPM_CLASSIFY_NODE} ${SPM_CLASSIFY_PREFIX}
+TimeoutStartSec=10min
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

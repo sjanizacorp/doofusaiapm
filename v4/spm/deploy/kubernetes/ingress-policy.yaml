@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: doofusai-spm-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: doofusai-spm
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              doofusai-spm-ingress: allowed
+      ports:
+        - protocol: TCP
+          port: 8000

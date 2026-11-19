@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import signal
 import subprocess
 import sys
@@ -172,13 +173,14 @@ def install(home, port, listen):
                 shutil.copy2(wrapper, home / "bin" / wrapper.name)
         (home / MARK).touch()
     print(f"Installed in {home}")
-    print(f"Start with: {home / 'bin/start.sh'}")
+    print("Start with: " + shlex.quote(str(home / "bin/start.sh")))
 
 
 def main():
     command = sys.argv[1]
     parser = argparse.ArgumentParser(prog=command + ".sh")
-    parser.add_argument("--prefix", type=Path)
+    parser.add_argument("--installdir", "--prefix", dest="installdir", type=Path,
+                        help="Installation directory (--prefix remains accepted)")
     if command == "install":
         parser.add_argument("--port", type=int)
         parser.add_argument("--listen-address", choices=("127.0.0.1", "0.0.0.0"))
@@ -190,7 +192,15 @@ def main():
     if getattr(args, "port", None) is not None and not 1024 <= args.port <= 65535:
         parser.error("--port must be between 1024 and 65535")
     inferred = HERE.parent if HERE.name == "bin" and (HERE.parent / MARK).exists() else DEFAULT_HOME
-    home = (args.prefix or Path(os.environ.get("DOOFUS_SPM_HOME", inferred))).expanduser().resolve()
+    selected = args.installdir
+    default = Path(os.environ.get("DOOFUS_SPM_HOME", inferred)).expanduser()
+    if command == "install" and selected is None:
+        try:
+            answer = input(f"Installation directory [{default}]: ").strip()
+        except EOFError:
+            parser.error("Enter an installation directory or supply --installdir PATH for unattended installation.")
+        selected = Path(answer) if answer else default
+    home = (selected or default).expanduser().resolve()
     if home in (Path("/"), Path.home()):
         parser.error("Choose a dedicated installation directory.")
     os.umask(0o077)

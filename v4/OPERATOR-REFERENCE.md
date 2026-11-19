@@ -94,3 +94,12 @@ For AD FS, use the issuer and discovery URL published by your federation adminis
 Map the authorized subject to a project using `./spm.sh map-identity <issuer> <subject> ModelOps alex.smith admin`. The stable subject comes from the provider. End users sign in at the familiar provider page with their normal credentials. Restart the product after configuring SSO. Confirm that the **Sign in with AD / Entra ID** button appears, that an authorized user enters the correct project, and an unmapped account is denied. Changing or deleting a mapping revokes its existing browser sessions. Keep identity-provider MFA and conditional access policies enabled as required by your organization.
 
 The callback verifies the authorization state, PKCE challenge, ID token signature, issuer, audience, expiry, and nonce. Validate this configuration in your real tenant before production use.
+
+
+## Choose the installation directory
+
+Run `./install.sh` to choose the destination interactively. The prompt shows the default destination. Enter a different dedicated path or press Enter to accept the default.
+
+For an unattended install, supply `./install.sh --installdir "/path/to/DoofusAI"`. Quote paths containing spaces. Use the same option with start, stop, status, uninstall, or spm when running the controls from an extracted package. The controls installed under the chosen directory's bin folder infer that installation location. The older --prefix spelling remains supported.
+
+The installer preserves data and configuration when reinstalling in an existing product directory, and rejects a nonempty directory that does not contain a DoofusAI installation marker.

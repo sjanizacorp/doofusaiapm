@@ -97,6 +97,8 @@ python3 --version
 ./status.sh
 ```
 
+The installer prompts for the installation directory. Press Enter for the displayed default or enter a dedicated destination. For unattended installation, use ./install.sh --installdir "/path/to/DoofusAI". Use --installdir with the lifecycle scripts when addressing a custom installation from the extracted package.
+
 The default address is http://127.0.0.1:8000 on the service host. The default installation directory is ~/.local/share/doofusai-spm. Publish an approved HTTPS address for access from other hosts.
 
 ```sh

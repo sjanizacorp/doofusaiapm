@@ -103,3 +103,8 @@ Run `./install.sh` to choose the destination interactively. The prompt shows the
 For an unattended install, supply `./install.sh --installdir "/path/to/DoofusAI"`. Quote paths containing spaces. Use the same option with start, stop, status, uninstall, or spm when running the controls from an extracted package. The controls installed under the chosen directory's bin folder infer that installation location. The older --prefix spelling remains supported.
 
 The installer preserves data and configuration when reinstalling in an existing product directory, and rejects a nonempty directory that does not contain a DoofusAI installation marker.
+
+
+## Python compatibility
+
+Lifecycle scripts check the Python version and compiled runtime compatibility before starting. They prefer python3.13 and check standard Python 3.13 locations. If your default python3 is 3.9, 3.14, or 3.15, it will not be used for the compiled client. For a custom installation use `DOOFUS_PYTHON=/path/to/python3.13 ./install.sh`. An explicit incompatible override is rejected with a setup message.

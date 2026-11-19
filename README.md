@@ -81,7 +81,7 @@ An administrator configures credential profiles on the collection server. The co
 
 ### Client deployment package
 
-The client package requires **CPython 3.13 on Linux or macOS**. It includes compiled Python modules, browser assets, lifecycle scripts, operator instructions, and illustrated manuals.
+The client package requires **CPython 3.13 on Linux or macOS**. Its shell launcher selects a compatible interpreter and checks bytecode compatibility before loading the runtime. If the default python3 is a different version, the launcher searches for Python 3.13. Set DOOFUS_PYTHON to its full path when it is installed in a custom location. It includes compiled Python modules, browser assets, lifecycle scripts, operator instructions, and illustrated manuals.
 
 1. Download and extract the client ZIP.
 2. Open a terminal in the extracted folder.

@@ -167,7 +167,7 @@ def install(home, port, listen):
         component = runtime_file(HERE, "lifecycle")
         if component.parent != home / "bin":
             shutil.copy2(component, home / "bin" / component.name)
-        for command in COMMANDS[1:]:
+        for command in (*COMMANDS[1:], "runtime"):
             wrapper = HERE / (command + ".sh")
             if wrapper.parent != home / "bin":
                 shutil.copy2(wrapper, home / "bin" / wrapper.name)

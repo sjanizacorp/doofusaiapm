@@ -13,4 +13,7 @@ fi
 if [ -f /etc/doofusai/relay.json ]; then
   set -- "$@" --relay-config /etc/doofusai/relay.json
 fi
+if [ -f /etc/doofusai/sso.json ]; then
+  set -- "$@" --sso-config /etc/doofusai/sso.json
+fi
 exec python3 /opt/doofusai/app.py "$@"

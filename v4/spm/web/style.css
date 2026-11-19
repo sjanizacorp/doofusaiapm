@@ -23,3 +23,5 @@ button:disabled{opacity:.6;cursor:wait}
 .entry span{overflow-wrap:anywhere} #status{font-weight:650;color:#7c2424}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#edf5f4;padding:1rem;border-radius:8px}
 #report{margin-top:1.5rem}
+
+.field-help{display:block;max-width:70ch;margin-top:.35rem;font-size:.9rem;font-weight:400;line-height:1.5;color:#34595c;overflow-wrap:anywhere}

@@ -134,9 +134,11 @@ def main():
     runner.add_argument("--once", action="store_true")
     runner.add_argument("--interval", type=int, default=10, choices=range(2, 301), metavar="SECONDS")
     actions.add_parser("list")
-    for command in ("queue", "jobs", "rotate", "revoke"):
+    for command in ("queue", "jobs", "rotate", "revoke", "schedule"):
         sub = actions.add_parser(command)
         sub.add_argument("agent")
+        if command == "schedule":
+            sub.add_argument("--minutes", type=int, required=True)
         if command == "rotate":
             sub.add_argument("--ttl-hours", type=int, default=24)
     args = parser.parse_args()
@@ -159,9 +161,9 @@ def main():
             with ZipFile(BytesIO(bundle)) as archive:
                 entries = archive.infolist()
                 names = [entry.filename for entry in entries]
-                if (not 1 <= len(entries) <= 32 or "agent.py" not in names or len(set(names)) != len(names)
+                if (not 1 <= len(entries) <= 32 or not {"agent.py", "agent.pyc"}.intersection(names) or len(set(names)) != len(names)
                         or sum(entry.file_size for entry in entries) > MAX_REPORT
-                        or any(not re.fullmatch(r"[a-z0-9_.-]+[.](?:py|txt)", name) or len(name) > 80
+                        or any(not re.fullmatch(r"[a-z0-9_.-]+[.](?:pyc?|txt)", name) or len(name) > 80
                                for name in names)):
                     raise Problem(400, "Bundle contained unsupported files.")
                 args.directory.mkdir(mode=0o700)
@@ -180,7 +182,9 @@ def main():
             if not re.fullmatch(r"[a-f0-9-]{36}", args.agent):
                 raise Problem(400, "Supply an enrolled agent ID.")
             target = path + "/" + args.agent
-            if args.command == "rotate":
+            if args.command == "schedule":
+                result = api.request(target + "/schedule", {"interval_minutes": args.minutes})
+            elif args.command == "rotate":
                 result = api.request(target + "/rotate", {"ttl_hours": args.ttl_hours})
             elif args.command == "revoke":
                 result = api.request(target, {}, method="DELETE")

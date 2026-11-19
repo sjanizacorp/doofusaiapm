@@ -7,7 +7,7 @@ import unittest
 from zipfile import ZipFile
 
 from agent_protocol import deployment
-from app import Handler, Product, database, issue, sync_gcs
+from app import Handler, Product, database, issue, sync_aws, sync_gcs
 from controls import Problem
 
 
@@ -54,8 +54,8 @@ class CollectionAgentTest(unittest.TestCase):
         self.assertEqual(len(self.request("GET", "sync-runs", self.admin)["runs"]), 1)
         with self.assertRaises(Problem):
             self.request("POST", "agent/report", agent["token"], report | {"snapshot": []})
-        with self.assertRaises(Problem):
-            sync_gcs(self.db, "main", "123", collect=lambda *_: [])
+        local = sync_gcs(self.db, "main", "123", collect=lambda *_: report["snapshot"])
+        self.assertEqual(local["status"], "completed")
         self.queued(agent)
         newer = self.claim(agent)
         wrong = report | {"job": newer["id"], "claim": newer["claim"],
@@ -67,6 +67,46 @@ class CollectionAgentTest(unittest.TestCase):
         asset, = self.request("GET", "assets", self.admin)["assets"]
         self.assertTrue(asset["source"]["active"])
         self.assertEqual(self.request("GET", "sync-runs", self.admin)["runs"][0]["status"], "failed")
+
+    def test_agent_report_does_not_overwrite_a_newer_direct_sync(self):
+        agent = self.enroll()
+        self.queued(agent)
+        job = self.claim(agent)
+        def bucket(name):
+            return {"name": name, "project_number": "123", "revision": "1", "facts": {}}
+        local = sync_gcs(self.db, "main", "123", collect=lambda *_: [bucket("local-store")])
+        report = {"job": job["id"], "claim": job["claim"], "status": "completed",
+                  "snapshot": [bucket("older-agent-store")]}
+        rejected = self.request("POST", "agent/report", agent["token"], report)
+        self.assertEqual(rejected["reason"], "superseded-by-newer-inventory")
+        self.assertEqual(self.request("POST", "agent/report", agent["token"], report), rejected)
+        self.assertEqual(self.request("GET", "sync-runs", self.admin)["runs"][0]["id"], local["id"])
+        self.queued(agent)
+        job = self.claim(agent)
+        accepted = self.request("POST", "agent/report", agent["token"],
+                                report | {"job": job["id"], "claim": job["claim"]})
+        self.assertEqual(accepted["status"], "completed")
+        assets = self.request("GET", "assets", self.admin)["assets"]
+        self.assertEqual([item["source"]["name"] for item in assets if item["source"]["active"]],
+                         ["older-agent-store"])
+
+    def test_direct_graph_collection_remains_available_with_enrolled_agent(self):
+        account, region = "123456789012", "us-east-1"
+        agent = self.request("POST", "agents", self.admin, {
+            "name": "AWS collector", "provider": "aws", "arguments": [account, region], "ttl_hours": 12,
+        })
+        self.queued(agent)
+        job = self.claim(agent)
+        snapshot = {"nodes": {"workload": {"kind": "model", "name": "Direct model"}}, "edges": []}
+        sync_aws(self.db, "main", account, region,
+                 collect=lambda *_: (snapshot["nodes"], snapshot["edges"]))
+        cancelled = self.request("POST", "agent/report", agent["token"], {
+            "job": job["id"], "claim": job["claim"], "status": "failed", "snapshot": None,
+        })
+        self.assertEqual(cancelled["status"], "cancelled")
+        cloud = self.request("GET", "cloud-graph", self.admin)
+        self.assertEqual(cloud["nodes"][0]["name"], "Direct model")
+        self.assertEqual(len(self.request("GET", "sync-runs", self.admin)["runs"]), 1)
 
     def test_retry_reassigns_lease_and_rotation_invalidates_old_token(self):
         original = self.enroll()
@@ -122,6 +162,30 @@ class CollectionAgentTest(unittest.TestCase):
         headers, data = http("GET", "agents/package", self.admin).split(b"\r\n\r\n", 1)
         self.assertIn(b"Content-Type: application/zip", headers)
         self.assertTrue(data.startswith(b"PK"))
+
+    def test_recurring_collection_and_disabling_schedule(self):
+        agent = self.enroll()
+        path = f"agents/{agent['id']}/schedule"
+        self.request("POST", path, self.admin, {"interval_minutes": 15})
+        first = self.claim(agent)
+        self.assertIsNotNone(first)
+        self.assertIsNone(self.claim(agent))
+        self.request("POST", "agent/report", agent["token"], {
+            "job": first["id"], "claim": first["claim"], "status": "completed", "snapshot": [],
+        })
+        self.assertIsNone(self.claim(agent))
+        with database(self.db, write=True) as conn:
+            conn.execute("UPDATE collection_agents SET next_run=? WHERE id=?",
+                         ("2000-01-01T00:00:00+00:00", agent["id"]))
+        second = self.claim(agent)
+        self.assertNotEqual(first["id"], second["id"])
+        self.request("POST", "agent/report", agent["token"], {
+            "job": second["id"], "claim": second["claim"], "status": "completed", "snapshot": [],
+        })
+        self.request("POST", path, self.admin, {"interval_minutes": 0})
+        self.assertIsNone(self.claim(agent))
+        with self.assertRaises(Problem):
+            self.request("POST", path, self.other, {"interval_minutes": 5})
 
     def test_package_and_provider_configuration(self):
         bundle = self.request("GET", "agents/package", self.admin)

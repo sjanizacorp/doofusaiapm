@@ -27,6 +27,13 @@ CREATE TABLE collection_jobs (
 CREATE UNIQUE INDEX collection_job_active ON collection_jobs(agent) WHERE status IN ('queued','running');
 CREATE INDEX collection_job_history ON collection_jobs(agent,created_at DESC);
 """
+BASELINE_SCHEMA = """
+ALTER TABLE collection_jobs ADD COLUMN baseline_sync TEXT;
+"""
+SCHEDULE_SCHEMA = """
+ALTER TABLE collection_agents ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE collection_agents ADD COLUMN next_run TEXT;
+"""
 PACKAGE = ("agent.py", "agent_protocol.py", "agentforce.py", "gcs.py", "controls.py",
            "vertex.py", "aws_inventory.py", "azure_inventory.py", "oci_inventory.py",
            "ibm_inventory.py", "salesforce_inventory.py", "vsphere_inventory.py", "requirements-vsphere.txt")
@@ -36,7 +43,10 @@ def package():
     output = BytesIO()
     with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
         for name in PACKAGE:
-            archive.writestr(name, Path(__file__).with_name(name).read_bytes())
+            source = Path(__file__).with_name(name)
+            if source.suffix == ".py" and not source.is_file():
+                source = source.with_suffix(".pyc")
+            archive.writestr(source.name, source.read_bytes())
     return output.getvalue()
 
 
@@ -53,7 +63,7 @@ def manage(conn, user, method, path, body, fields, stamp, audit):
     project = user["project"]
     if path == "/api/v1/agents" and method == "GET":
         rows = conn.execute("""
-            SELECT id,name,provider,scope,expires_at,revoked_at,last_seen,created_at
+            SELECT id,name,provider,scope,expires_at,revoked_at,last_seen,created_at,interval_minutes,next_run
             FROM collection_agents WHERE project=? ORDER BY created_at DESC,id LIMIT 100
         """, (project,))
         return 200, {"agents": [dict(row) for row in rows]}
@@ -69,7 +79,7 @@ def manage(conn, user, method, path, body, fields, stamp, audit):
         key, now = str(uuid4()), stamp()
         token, hashed = secret()
         expires = (datetime.now(timezone.utc) + timedelta(hours=ttl)).isoformat(timespec="milliseconds")
-        conn.execute("INSERT INTO collection_agents VALUES(?,?,?,?,?,?,?,?,NULL,NULL,?)",
+        conn.execute("INSERT INTO collection_agents(id,project,name,provider,scope,arguments,token_digest,expires_at,revoked_at,last_seen,created_at) VALUES(?,?,?,?,?,?,?,?,NULL,NULL,?)",
                      (key, project, name, provider, scope, json.dumps(arguments), hashed, expires, now))
         audit(conn, user, "agent.enrolled", key, {"provider": provider, "scope": scope})
         return 201, {"id": key, "scope": scope, "token": token, "expires_at": expires}
@@ -90,6 +100,15 @@ def manage(conn, user, method, path, body, fields, stamp, audit):
                       WHERE agent=? AND status IN ('queued','running')""", (now, key))
         audit(conn, user, "agent.revoked", key)
         return 200, {"id": key, "revoked": True}
+    if elements[1:] == ["schedule"] and method == "POST":
+        fields(body, ("interval_minutes",))
+        interval = body["interval_minutes"]
+        if type(interval) is not int or interval not in (0, 5, 15, 30, 60, 360, 1440) or agent["revoked_at"]:
+            raise Problem(400, "Choose a supported collection interval.")
+        conn.execute("UPDATE collection_agents SET interval_minutes=?,next_run=? WHERE id=?",
+                     (interval, stamp() if interval else None, key))
+        audit(conn, user, "agent.schedule.updated", key, {"interval_minutes": interval})
+        return 200, {"interval_minutes": interval}
     if elements[1:] == ["rotate"] and method == "POST":
         fields(body, ("ttl_hours",))
         ttl = body["ttl_hours"]
@@ -136,22 +155,41 @@ def authenticate(conn, token, stamp):
     return agent
 
 
+def latest_completed_sync(conn, agent):
+    latest = conn.execute(
+        """SELECT id FROM sync_runs WHERE project=? AND provider=? AND source_project=?
+           AND status='completed' ORDER BY rowid DESC LIMIT 1""",
+        (agent["project"], agent["provider"], agent["scope"]),
+    ).fetchone()
+    return latest["id"] if latest else None
+
+
 def poll(conn, agent, stamp, reconcile):
     now, key = stamp(), agent["id"]
     conn.execute("UPDATE collection_agents SET last_seen=? WHERE id=?", (now, key))
     job = conn.execute("SELECT * FROM collection_jobs WHERE agent=? AND status IN ('queued','running')",
                        (key,)).fetchone()
+    if job is None and agent["interval_minutes"] and (not agent["next_run"] or agent["next_run"] <= now):
+        job_id = str(uuid4())
+        conn.execute("INSERT INTO collection_jobs(id,agent,status,created_at) VALUES(?,?,'queued',?)",
+                     (job_id, key, now))
+        job = conn.execute("SELECT * FROM collection_jobs WHERE id=?", (job_id,)).fetchone()
     if job is None or (job["status"] == "running" and job["lease_until"] > now):
         return {"job": None}
+    baseline = latest_completed_sync(conn, agent)
     if job["attempts"] >= 3:
-        reconcile(conn, agent, job, "failed", None, now)
+        if baseline == job["baseline_sync"]:
+            reconcile(conn, agent, job, "failed", None, now)
         conn.execute("""UPDATE collection_jobs SET status='failed',finished_at=?,result=? WHERE id=?""",
                      (now, '{"error":"Agent lease expired after three attempts."}', job["id"]))
         return {"job": None}
+    if agent["interval_minutes"]:
+        next_run = (datetime.now(timezone.utc) + timedelta(minutes=agent["interval_minutes"])).isoformat(timespec="milliseconds")
+        conn.execute("UPDATE collection_agents SET next_run=? WHERE id=?", (next_run, key))
     claim = secrets.token_urlsafe(32)
     lease = (datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat(timespec="milliseconds")
-    conn.execute("""UPDATE collection_jobs SET status='running',claim=?,lease_until=?,attempts=attempts+1
-                    WHERE id=?""", (claim, lease, job["id"]))
+    conn.execute("""UPDATE collection_jobs SET status='running',claim=?,lease_until=?,baseline_sync=?,
+                    attempts=attempts+1 WHERE id=?""", (claim, lease, baseline, job["id"]))
     return {"job": {"id": job["id"], "claim": claim, "provider": agent["provider"],
                     "arguments": json.loads(agent["arguments"])}}
 
@@ -172,8 +210,11 @@ def report(conn, agent, body, fields, stamp, reconcile):
         raise Problem(409, "Collection lease is no longer active.")
     if status == "failed" and body["snapshot"] is not None:
         raise Problem(400, "Failed reports must omit snapshot content.")
-    result = reconcile(conn, agent, job, status, body["snapshot"], now)
+    if latest_completed_sync(conn, agent) != job["baseline_sync"]:
+        result = {"id": key, "status": "cancelled", "reason": "superseded-by-newer-inventory"}
+    else:
+        result = reconcile(conn, agent, job, status, body["snapshot"], now)
     conn.execute("""UPDATE collection_jobs SET status=?,finished_at=?,result=?,report_digest=? WHERE id=?""",
-                 (status, now, json.dumps(result), fingerprint, key))
+                 (result["status"], now, json.dumps(result), fingerprint, key))
     conn.execute("UPDATE collection_agents SET last_seen=? WHERE id=?", (now, agent["id"]))
     return result

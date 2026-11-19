@@ -69,13 +69,111 @@ function row(text, label, action) {
 }
 
 const agentTargets = {
-  aws: '["account ID","region","optional Access Analyzer ARN"]',
-  gcs: '["cloud project ID"]', vertex: '["cloud project ID","region"]',
-  azure: '["subscription ID","resource group","workspace"]',
-  oci: '["compartment OCID","region"]', ibm: '["deployment space UUID","region"]',
-  salesforce: '["My Domain hostname","org ID","optional API version"]',
-  vsphere: '["ESXi/vCenter host","optional port as a string"]',
+  aws: ["AWS account ID", "AWS region", "Access Analyzer ARN (optional)"],
+  gcs: ["Google project ID"], vertex: ["Google project ID", "Google region"],
+  azure: ["Azure subscription ID", "Resource group", "ML workspace"],
+  oci: ["OCI compartment OCID", "OCI region"], ibm: ["IBM deployment space UUID", "IBM region"],
+  salesforce: ["Salesforce My Domain hostname", "Salesforce organization ID", "API version (optional)"],
+  vsphere: ["vCenter or ESXi hostname", "Port (optional)"],
 };
+
+const fieldExamples = {
+  "AWS account ID": ["123456789012", "Your 12-digit AWS account number."],
+  "AWS region": ["us-east-1", "Choose the region containing your SageMaker or Bedrock resources."],
+  "Access Analyzer ARN (optional)": ["arn:aws:access-analyzer:us-east-1:123456789012:analyzer/read-only", "Leave blank to collect without Access Analyzer findings."],
+  "Google project ID": ["my-model-project", "Use the project ID from Google Cloud, rather than its display name."],
+  "Google region": ["us-central1", "Use the region containing your Vertex AI resources."],
+  "Azure subscription ID": ["12345678-1234-1234-1234-123456789abc", "Copy the subscription ID from the Azure portal."],
+  "Resource group": ["rg-model-production", "The resource group containing your ML workspace."],
+  "ML workspace": ["production-ml", "The Azure Machine Learning workspace name."],
+  "OCI compartment OCID": ["ocid1.compartment.oc1..example", "Copy the full compartment OCID from Oracle Cloud. Replace this illustration."],
+  "OCI region": ["us-ashburn-1", "The region containing your Data Science resources."],
+  "IBM deployment space UUID": ["12345678-1234-1234-1234-123456789abc", "Copy the watsonx.ai deployment space ID."],
+  "IBM region": ["us-south", "The region hosting your watsonx.ai deployment space."],
+  "Salesforce My Domain hostname": ["company.my.salesforce.com", "Enter the hostname without https:// or a trailing slash."],
+  "Salesforce organization ID": ["00D000000000001", "Copy your org ID from Salesforce Company Information."],
+  "API version (optional)": ["68.0", "Use 68.0 or later for Agentforce discovery; blank uses 63.0."],
+  "vCenter or ESXi hostname": ["vcenter.example.com", "Use a hostname reachable from the collector."],
+  "Port (optional)": ["443", "Leave blank for the standard HTTPS port 443."],
+};
+function targetField(name, index, prefix) {
+  const label = document.createElement("label");
+  const id = prefix + "-" + index;
+  label.htmlFor = id;
+  const title = document.createElement("span");
+  title.textContent = name;
+  const input = document.createElement("input");
+  input.id = id;
+  input.maxLength = 300;
+  input.required = !name.includes("(optional)");
+  input.placeholder = fieldExamples[name][0];
+  const hint = document.createElement("small");
+  hint.id = id + "-help";
+  hint.className = "field-help";
+  hint.textContent = "Example: " + fieldExamples[name][0] + ". " + fieldExamples[name][1];
+  input.setAttribute("aria-describedby", hint.id);
+  label.append(title, input, hint);
+  return label;
+}
+
+let connectionRequirements = {};
+for (const option of byId("agent-provider").options) {
+  byId("connection-provider").add(new Option(option.text, option.value));
+}
+byId("connection-provider").onchange = () => {
+  const provider = byId("connection-provider").value;
+  byId("connection-fields").replaceChildren(...agentTargets[provider].map(
+    (name, index) => targetField(name, index, "connection")));
+  byId("connection-help").textContent = connectionRequirements[provider] ?? "";
+};
+byId("connection-provider").onchange();
+byId("connection-form").onsubmit = perform(async () => {
+  const args = Array.from(byId("connection-fields").querySelectorAll("input"), (input) => input.value.trim());
+  while (args.length && !args[args.length - 1]) args.pop();
+  await call("/api/v1/connections", {
+    name: byId("connection-name").value, provider: byId("connection-provider").value,
+    arguments: args, profile: byId("connection-profile").value,
+  });
+  await loadConnections();
+  byId("status").textContent = "Connection saved. Choose Test connection or Run scan.";
+});
+async function loadConnections() {
+  const { data } = await call("/api/v1/connections");
+  connectionRequirements = data.requirements;
+  const select = byId("connection-profile");
+  const previous = select.value;
+  select.replaceChildren(...data.profiles.map((name) => new Option(
+    name === "server" ? "Current server identity" : name, name)));
+  if (data.profiles.includes(previous)) select.value = previous;
+  byId("connection-help").textContent = data.requirements[byId("connection-provider").value];
+  async function history(connection) {
+    const { data } = await call("/api/v1/connections/" + connection.id + "/runs");
+    byId("connection-runs").replaceChildren(row(connection.name + " results"),
+      ...data.runs.map((run) => row([run.mode, run.status, run.created_at,
+        run.result?.error ?? (run.status === "completed" ? "Successful" : "Use Refresh results for progress"),
+      ].join(" · "))));
+  }
+  byId("connection-list").replaceChildren(...data.connections.map((connection) => {
+    const group = document.createElement("div");
+    const path = "/api/v1/connections/" + connection.id;
+    group.append(row([connection.name, connection.provider, connection.scope, connection.profile].join(" · ")));
+    for (const [operation, label] of [["test", "Test connection"], ["scan", "Run scan"]]) {
+      group.append(row("", label, async () => {
+        await call(path + "/" + operation, {});
+        byId("status").textContent = "Operation started. Choose Refresh results to check progress.";
+        await history(connection);
+      }));
+    }
+    group.append(row("", "Refresh results", () => history(connection)));
+    group.append(row("", "Remove connection", async () => {
+      if (!window.confirm("Remove this saved connection? Collected inventory is retained.")) return;
+      await call(path, {}, "DELETE");
+      await loadConnections();
+    }));
+    return group;
+  }));
+  if (!data.connections.length) byId("connection-list").textContent = "No connections configured.";
+}
 
 function revealAgentToken(token) {
   byId("agent-token").value = token;
@@ -102,6 +200,19 @@ async function loadAgents() {
       agent.last_seen ? "Last seen " + agent.last_seen : "Awaiting first check-in",
     ].join(" · "), "Run history", jobs));
     if (!agent.revoked_at) {
+      const schedule = document.createElement("label");
+      schedule.textContent = "Collection frequency";
+      const frequency = document.createElement("select");
+      for (const [minutes, label] of [[0, "On demand"], [5, "Every 5 minutes"], [15, "Every 15 minutes"],
+        [30, "Every 30 minutes"], [60, "Hourly"], [360, "Every 6 hours"], [1440, "Daily"]]) {
+        frequency.add(new Option(label, minutes));
+      }
+      frequency.value = String(agent.interval_minutes);
+      schedule.append(frequency);
+      group.append(schedule, row("", "Save frequency", async () => {
+        await call(path + "/schedule", {interval_minutes: Number(frequency.value)});
+        await loadAgents();
+      }));
       group.append(
         row("", "Run now", async () => {
           const { data } = await call(path + "/jobs", {});
@@ -126,16 +237,14 @@ async function loadAgents() {
 }
 
 byId("agent-provider").onchange = () => {
-  byId("agent-target-help").textContent = agentTargets[byId("agent-provider").value];
+  byId("agent-target-fields").replaceChildren(...agentTargets[byId("agent-provider").value].map(
+    (name, index) => targetField(name, index, "agent")));
+
 };
 byId("agent-provider").onchange();
 byId("agent-enroll").onsubmit = perform(async () => {
-  let args;
-  try {
-    args = JSON.parse(byId("agent-target").value);
-  } catch {
-    throw Error("Enter the target as a JSON array of strings.");
-  }
+  const args = Array.from(byId("agent-target-fields").querySelectorAll("input"), (input) => input.value.trim());
+  while (args.length && args[args.length - 1] === "") args.pop();
   const { data } = await call("/api/v1/agents", {
     name: byId("agent-name").value, provider: byId("agent-provider").value, arguments: args,
     ttl_hours: Number(byId("agent-ttl").value),
@@ -329,6 +438,7 @@ async function loadIssues() {
           const label = document.createElement("label");
           label.textContent = "Assignee principal";
           const field = document.createElement("input");
+          field.placeholder = "e.g. Model Operations";
           field.maxLength = 80;
           field.placeholder = "Leave blank to unassign";
           field.value = detail.issue.assignee ?? "";
@@ -344,6 +454,7 @@ async function loadIssues() {
           const exceptionForm = document.createElement("form");
           const reasonLabel = document.createElement("label");
           const reason = document.createElement("input");
+          reason.placeholder = "e.g. Approved temporary exception while encryption is enabled";
           reasonLabel.textContent = "Exception reason";
           reason.maxLength = 500;
           reason.required = true;
@@ -429,6 +540,7 @@ async function navigate(view) {
     byId("sync-list").replaceChildren(...entries);
     if (!entries.length) byId("sync-list").textContent = "No cloud syncs recorded.";
   }
+  if (view === "connections") await loadConnections();
   if (view === "agents") await loadAgents();
   else revealAgentToken("");
   if (view === "data-posture") await loadDataPosture();
@@ -511,6 +623,7 @@ async function openProject(accessToken) {
   byId("project").textContent = user.project;
   byId("identity").textContent = user.principal + " · " + user.role;
   byId("audit-tab").hidden = user.role !== "admin";
+  byId("connections-tab").hidden = user.role !== "admin";
   byId("agents-tab").hidden = user.role !== "admin";
   byId("data-posture-tab").hidden = user.role !== "admin";
   byId("access-tab").hidden = user.role !== "admin";
@@ -520,6 +633,38 @@ async function openProject(accessToken) {
   byId("workspace").hidden = false;
   byId("logout").hidden = false;
 }
+
+byId("local-session").onsubmit = perform(async () => {
+  const { data } = await call("/auth/local", {
+    username: byId("username").value.trim(), password: byId("password").value,
+  });
+  byId("password").value = "";
+  await openProject(data.access_token);
+});
+fetch("/auth/options").then((response) => response.json()).then((data) => {
+  byId("sso-login").hidden = !data.sso;
+}).catch(() => {});
+byId("start-sso").onclick = perform(async () => {
+  const { data } = await call("/auth/sso/start", {});
+  sessionStorage.setItem("doofus-sso-state", data.state);
+  location.assign(data.url);
+});
+(async () => {
+  const query = new URLSearchParams(location.search);
+  if (!query.has("code") && !query.has("error")) return;
+  const state = sessionStorage.getItem("doofus-sso-state");
+  sessionStorage.removeItem("doofus-sso-state");
+  history.replaceState(null, "", "/");
+  try {
+    if (query.has("error") || !state || state !== query.get("state")) {
+      throw Error("Organization sign-in was cancelled or could not be verified.");
+    }
+    const { data } = await call("/auth/sso/complete", {state, code: query.get("code")});
+    await openProject(data.access_token);
+  } catch (error) {
+    byId("status").textContent = error.message;
+  }
+})();
 
 byId("session").onsubmit = perform(async () => {
   await openProject(byId("token").value.trim());
@@ -569,7 +714,10 @@ byId("cancel-device").onclick = perform(async () => {
   if (session) await call("/auth/device/cancel", { session });
 });
 
-byId("logout").onclick = () => location.reload();
+byId("logout").onclick = perform(async () => {
+  await call("/api/v1/session/logout", {});
+  location.reload();
+});
 byId("kind").onchange = fillFacts;
 fillFacts();
 byId("issue-filter").onsubmit = perform(loadIssues);

@@ -651,4 +651,16 @@ The Linux systemd unit in `deploy/systemd/doofusai-agent@.service` expects each 
 | Salesforce | My Domain host, org ID, optional API version | `DOOFUS_SALESFORCE_TOKEN`. API v68+ includes Agentforce metadata. |
 | VMware | ESXi/vCenter host, optional port | Install `requirements-vsphere.txt`. Set `SPM_VSPHERE_USER` and `SPM_VSPHERE_PASSWORD`. For a private CA, set `DOOFUS_AGENT_VSPHERE_CA` to its PEM file. |
 
-Use one active agent per project and inventory scope. Enrolling a scope transfers inventory reconciliation to the agent. The runner sends normalized inventory metadata and relationships without forwarding platform credentials. The engine gives jobs expiring leases and deduplicates report retries. A failed collection keeps the previous inventory. Set the HTTPS ingress request-body allowance to at least 2 MiB for `/api/v1/agent/report`. Report coverage currently includes inventory and its existing posture assessments.
+Use one active agent per project and inventory scope. Direct server connectors remain available before and after enrollment, including for the same scope. A report whose inventory baseline changed after the job was claimed is marked cancelled so it cannot replace newer evidence. The runner sends normalized inventory metadata and relationships without forwarding platform credentials. The engine gives jobs expiring leases and deduplicates report retries. A failed collection keeps the previous inventory. Set the HTTPS ingress request-body allowance to at least 2 MiB for `/api/v1/agent/report`. Report coverage currently includes inventory and its existing posture assessments.
+
+### Agent creation wizard and collection frequency
+
+Open **Agents**, enter a name, choose a platform and complete its labeled target fields. Enroll to create the scoped credential and download the collector bundle. Once the poller is installed, choose **Run now** for an immediate job or set **Collection frequency** and choose **Save frequency** for recurring runs. The scheduler dispatches due work when the poller checks in and allows one active job per collector. **On demand** disables subsequent scheduled jobs. It leaves an already queued or running job in place.
+
+The CLI equivalent is `agent.py --origin "$SPM_ORIGIN" schedule "$AGENT_ID" --minutes 15`. Supported intervals are 5, 15, 30, 60, 360 and 1440 minutes. Use zero to return to on-demand collection. The agent credential must remain valid and the local poller must remain running.
+
+## Configure and scan platforms in the console
+
+Project administrators can now open **Connections** to save AWS, Google Cloud Storage, Vertex AI, Azure ML, Oracle Cloud, IBM Cloud, Salesforce, and VMware ESXi/vCenter targets. The form adapts its fields to the chosen provider. Select a server credential profile and save the connection, then choose **Test connection** or **Run scan**. Testing reads inventory without saving it. Scanning refreshes the existing inventory and posture assessments. Use **Refresh results** to check completion.
+
+A profile selects credentials available on the server. By default, collection uses the service account's configured provider identity. To use multiple identities, configure the private JSON file named by `DOOFUS_CONNECTION_PROFILES`. The console displays its profile names. File permissions must restrict access to the service account. Full examples are in the distribution's OPERATOR-REFERENCE.md. Provider tools and read permissions are required where the scan executes.

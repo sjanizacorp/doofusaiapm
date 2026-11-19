@@ -1,6 +1,6 @@
 """DoofusAI SPM, authored by Aniza Inc."""
 import argparse
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -14,14 +14,17 @@ import re
 import secrets
 import signal
 import sqlite3
-from threading import BoundedSemaphore, Thread
-from time import perf_counter
+from threading import BoundedSemaphore, Thread, Lock
+from time import perf_counter, monotonic
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import gcs
 import agent_protocol
 import agent_registry
+import connections
+import local_login
+import sso_login
 import controls
 from controls import Problem
 import verification
@@ -165,7 +168,7 @@ MIGRATIONS = (
     controls.SCHEMA, federation.SCHEMA, STREAM_SCHEMA, vertex.SCHEMA, RUNTIME_CREDENTIAL_SCHEMA,
     controls.RUNTIME_TARGET_SCHEMA, ai_bom.SCHEMA, runtime_policy.SCHEMA, runtime_policy.TOOL_SCHEMA,
     aws_inventory.SCHEMA, runtime_policy.MODEL_SCHEMA, access_reviews.SCHEMA, data_posture.SCHEMA,
-    data_posture.CONTENT_SCHEMA, agent_registry.SCHEMA,
+    data_posture.CONTENT_SCHEMA, agent_registry.SCHEMA, agent_registry.BASELINE_SCHEMA, agent_registry.SCHEDULE_SCHEMA, connections.SCHEMA, local_login.SCHEMA,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -433,12 +436,6 @@ def import_bom(path, project, workload, raw, source=None):
                 "relationships": relationships}
 
 
-def ensure_local_collector(conn, project, provider, scope):
-    if conn.execute("""SELECT 1 FROM collection_agents WHERE project=? AND scope=?
-                       AND provider=? AND revoked_at IS NULL""", (project, scope, provider)).fetchone():
-        raise Problem(409, "Use the enrolled collection agent for this scope.")
-
-
 def persist_gcs(conn, project, source_project, buckets, identity, run_id, started, finished):
     conn.execute(
         "UPDATE cloud_assets SET active=0 WHERE project=? AND provider='gcs' AND source_project=?",
@@ -493,11 +490,9 @@ def sync_gcs(path, project, source_project, quota_project=None, *, collect=gcs.d
             buckets = collect(source_project, quota_project)
             finished = timestamp()
             with database(path, write=True) as conn:
-                ensure_local_collector(conn, project, "gcs", source_project)
                 return persist_gcs(conn, project, source_project, buckets, identity, run_id, started, finished)
         except gcs.CollectionError as error:
             with database(path, write=True) as conn:
-                ensure_local_collector(conn, project, "gcs", source_project)
                 conn.execute(
                     """INSERT INTO sync_runs VALUES(?,?,'gcs',?,?,?,'failed',NULL,?)""",
                     (run_id, project, source_project, started, timestamp(), str(error)),
@@ -877,7 +872,6 @@ def sync_cloud_graph(path, project, provider, scope, collect, *, analyzer=None):
             nodes, edges = collect()
             finished = timestamp()
             with database(path, write=True) as conn:
-                ensure_local_collector(conn, project, provider, scope)
                 return persist_cloud_graph(conn, project, provider, scope, nodes, edges, identity, run_id, started, finished, analyzer)
         except gcs.CollectionError as error:
             with database(path, write=True) as conn:
@@ -917,16 +911,60 @@ def reconcile_agent_report(conn, agent, job, status, snapshot, finished):
 
 
 class Product:
-    def __init__(self, path, issuer=None, chat_gateway=None, relay=None):
+    def __init__(self, path, issuer=None, chat_gateway=None, relay=None, sso=None):
         self.path = path
         self.boot_id = uuid4().hex
         node = os.environ.get("SPM_NODE_NAME", "")
         self.node = node if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}", node) else None
         self.chat_gateway = chat_gateway
         self.relay = relay
+        self.login_attempts = deque()
+        self.login_lock = Lock()
+        self.sso = sso
         self.issuer = issuer
         self.device = device_login.DeviceLogin(issuer) if issuer and issuer.device_config is not None else None
         initialize(path)
+        self.connections = connections.Connections(path, database, audit, timestamp)
+
+    def browser_login(self, route, method, body=None):
+        if method == "GET" and route == "/auth/options":
+            return 200, {"local": True, "sso": self.sso is not None}
+        if method != "POST":
+            raise Problem(404, "Sign-in route unavailable.")
+        if route == "/auth/local":
+            object_fields(body, ("username", "password"))
+            with self.login_lock:
+                now = monotonic()
+                while self.login_attempts and self.login_attempts[0] < now - 60:
+                    self.login_attempts.popleft()
+                if len(self.login_attempts) >= 30:
+                    raise Problem(429, "Too many sign-in attempts. Try again in one minute.")
+                self.login_attempts.append(now)
+            with database(self.path, write=True) as conn:
+                result = local_login.authenticate(conn, body["username"], body["password"], timestamp)
+                if result:
+                    user = conn.execute("SELECT project,principal FROM local_users WHERE username=?",
+                                        (body["username"].lower(),)).fetchone()
+                    audit(conn, user, "user.signed_in", user["principal"])
+            if result is None:
+                raise Problem(401, "Username or password is incorrect or temporarily locked.")
+            return 200, result
+        if self.sso and route == "/auth/sso/start":
+            object_fields(body, ())
+            return 200, self.sso.start()
+        if self.sso and route == "/auth/sso/complete":
+            object_fields(body, ("state", "code"))
+            issuer, subject = self.sso.complete(body["state"], body["code"])
+            with database(self.path, write=True) as conn:
+                user = conn.execute("SELECT * FROM federated_users WHERE issuer=? AND subject=?",
+                                    (issuer, subject)).fetchone()
+                if user is None:
+                    raise Problem(403, "Your organization account has no project access.")
+                result = local_login.session(conn, user["project"], user["principal"], user["role"],
+                                             "sso:" + issuer + ":" + subject)
+                audit(conn, user, "user.sso.signed_in", user["principal"])
+                return 200, result
+        raise Problem(404, "Sign-in route unavailable.")
 
     def device_request(self, route, method, origin, body=None):
         if route == "/auth/device" and method == "GET":
@@ -1043,6 +1081,9 @@ class Product:
                     return 200, agent_registry.poll(conn, agent, timestamp, reconcile_agent_report)
                 return 200, agent_registry.report(conn, agent, body, object_fields, timestamp,
                                                   reconcile_agent_report)
+        if route == "/api/v1/connections" or route.startswith("/api/v1/connections/"):
+            _, user = self.request("GET", "/api/v1/me", token)
+            return self.connections.request(method, route, user, body, object_fields)
         subject = None
         if self.issuer is not None and "." in token:
             subject = self.issuer.verify(token)
@@ -1080,13 +1121,18 @@ class Product:
                     raise Problem(403, "Credential is bound to another runtime event source.")
                 if (tool_check or model_check) and isinstance(body, dict) and body.get("agent") != user["agent_node"]:
                     raise Problem(403, "Credential is bound to another agent.")
-            if method != "GET" and user["role"] == "viewer":
+            if method != "GET" and user["role"] == "viewer" and route != "/api/v1/session/logout":
                 raise Problem(403, "This credential is read-only.")
             if route == "/api/v1/agents" or route.startswith("/api/v1/agents/"):
                 controls.protect_admin(user)
                 if route == "/api/v1/agents/package" and method == "GET":
                     return 200, agent_registry.package()
                 return agent_registry.manage(conn, user, method, route, body, object_fields, timestamp, audit)
+            if route == "/api/v1/session/logout" and method == "POST":
+                object_fields(body, ())
+                conn.execute("DELETE FROM credentials WHERE digest IN "
+                             "(SELECT digest FROM browser_sessions WHERE digest=?)", (digest(token),))
+                return 200, {"signed_out": True}
             if route == "/api/v1/me" and method == "GET":
                 result = {k: user[k] for k in ("principal", "project", "role")}
                 if user["expires_at"] is not None:
@@ -1481,9 +1527,10 @@ class Handler(BaseHTTPRequestHandler):
                     if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
                         raise Problem(503, "Storage schema is not ready.")
                 return self.send(200, {"status": "ok"})
+            browser_login = route in ("/auth/options", "/auth/local", "/auth/sso/start", "/auth/sso/complete")
             device = route == "/auth/device" or route.startswith("/auth/device/")
             auth = self.headers.get("Authorization", "")
-            if not device and (not auth.startswith("Bearer ") or len(auth) > 8192):
+            if not device and not browser_login and (not auth.startswith("Bearer ") or len(auth) > 8192):
                 raise Problem(401, "Supply a valid bearer token.")
             body = None
             if self.command in ("POST", "DELETE"):
@@ -1501,7 +1548,13 @@ class Handler(BaseHTTPRequestHandler):
                         body = json.loads(raw)
                 except (ValueError, RecursionError):
                     raise Problem(400, "Invalid JSON body.") from None
-            if device:
+            if browser_login:
+                if self.command == "POST":
+                    origin = urlsplit(self.headers.get("Origin", ""))
+                    if origin.scheme not in ("http", "https") or origin.netloc != self.headers.get("Host"):
+                        raise Problem(403, "Sign in from the application page.")
+                status, result = self.server.product.browser_login(route, self.command, body)
+            elif device:
                 status, result = self.server.product.device_request(route, self.command, self.headers.get("Origin"), body)
             else:
                 status, result = self.server.product.request(self.command, self.path, auth[7:], body)
@@ -1562,6 +1615,7 @@ def main():
     serve.add_argument("--listen-address", choices=("127.0.0.1", "0.0.0.0"), default="127.0.0.1")
     serve.add_argument("--relay-config", type=Path, help="Enable a fixed-destination JSON enforcement relay")
     serve.add_argument("--chat-gateway-config", type=Path, help="Enable project and agent bound text gateway routes")
+    serve.add_argument("--sso-config", type=Path, help="Entra ID or AD FS OIDC sign-in configuration")
     serve.add_argument("--issuer-config", type=Path, help="Trusted RFC 9068 issuer configuration")
     serve.add_argument("--metrics-token-file", type=Path, help="Enable the protected Prometheus endpoint")
     mapping = commands.add_parser("map-identity")
@@ -1573,6 +1627,10 @@ def main():
     unmap = commands.add_parser("unmap-identity")
     unmap.add_argument("issuer")
     unmap.add_argument("subject")
+    user_command = commands.add_parser("set-local-user", help="Create or reset a username/password account")
+    user_command.add_argument("project")
+    user_command.add_argument("username")
+    user_command.add_argument("role", choices=("admin", "operator", "viewer"))
     provision = commands.add_parser("issue")
     provision.add_argument("project")
     provision.add_argument("principal")
@@ -1753,6 +1811,21 @@ def main():
             parser.exit(1, f"Verification failed: {error}\n")
         return
     args.db.parent.mkdir(parents=True, exist_ok=True)
+    if args.command == "set-local-user":
+        import getpass
+        try:
+            project = identifier(args.project)
+            password = getpass.getpass("New password or passphrase (12–128 characters): ")
+            if password != getpass.getpass("Repeat password: "):
+                raise Problem(400, "Passwords did not match.")
+            initialize(args.db)
+            with database(args.db, write=True) as conn:
+                local_login.set_user(conn, project, args.username, password, args.role)
+                audit(conn, {"project": project, "principal": "local-cli"}, "local.user.updated", args.username)
+            print("Local username/password account saved.")
+        except (Problem, EOFError) as error:
+            parser.exit(1, f"Local account could not be saved: {error}\n")
+        return
     if args.command == "promote-recovery":
         try:
             with service_guard(args.db):
@@ -1802,6 +1875,9 @@ def main():
         issuer_url = federation.https_issuer(args.issuer)
         subject = federation.subject(args.subject)
         with database(args.db, write=True) as conn:
+            conn.execute("DELETE FROM credentials WHERE digest IN "
+                         "(SELECT digest FROM browser_sessions WHERE username=?)",
+                         ("sso:" + issuer_url + ":" + subject,))
             previous = conn.execute(
                 "SELECT project,principal FROM federated_users WHERE issuer=? AND subject=?",
                 (issuer_url, subject),
@@ -1988,7 +2064,13 @@ def main():
                     relay = (identifier(settings["project"]), runtime_relay.Relay(
                         settings["target"], os.environ.get("DOOFUS_RELAY_UPSTREAM_TOKEN")
                     ))
-                product = Product(args.db, issuer, gateway, relay)
+                sso = None
+                if args.sso_config:
+                    try:
+                        sso = sso_login.SSO(verification.parse_json(verification.read_limited(args.sso_config, 8192)))
+                    except ImportError:
+                        raise Problem(400, "Install requirements-sso.txt to enable organization sign-in.") from None
+                product = Product(args.db, issuer, gateway, relay, sso)
                 with PostureHTTPServer((args.listen_address, args.port), Handler) as server:
                     server.product = product
                     server.metrics_token = metrics_token

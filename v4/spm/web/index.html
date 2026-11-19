@@ -12,8 +12,16 @@
 <main>
 <section id="login" class="panel intro">
 <h1>Open your project</h1>
-<p>Enter a project credential issued by your administrator.</p>
-<form id="session"><label for="token">Access token</label><input id="token" type="password" required autocomplete="off"><button>Connect</button></form>
+<p>Sign in with your username and password or your organization account.</p>
+<form id="local-session">
+<label>Username<input id="username" placeholder="e.g. alex.smith" required maxlength="80" autocomplete="username"></label>
+<label>Password<input id="password" type="password" required maxlength="128" autocomplete="current-password"></label>
+<button>Sign in</button>
+</form>
+<div id="sso-login" hidden><button id="start-sso">Sign in with AD / Entra ID</button></div>
+<details><summary>Administrator access token</summary>
+<form id="session"><label for="token">Access token</label><input id="token" placeholder="Paste the access token supplied by your administrator" type="password" required autocomplete="off"><button>Connect</button></form>
+</details>
 <div id="enterprise-login" hidden>
 <button id="start-device">Sign in with your organization</button>
 <div id="device-challenge" hidden>
@@ -26,7 +34,7 @@
 </section>
 <section id="workspace" hidden>
 <h1 id="project"></h1><p id="identity"></p>
-<nav aria-label="Workspace"><button data-view="inventory">Inventory</button><button data-view="issues">Issues</button><button data-view="history">Scan history</button><button data-view="relationships">Relationships</button><button data-view="boms">AI bills of materials</button><button data-view="runtime">Runtime findings</button><button data-view="syncs">Cloud syncs</button><button id="agents-tab" data-view="agents" hidden>Agents</button><button id="data-posture-tab" data-view="data-posture" hidden>Data posture</button><button id="access-tab" data-view="access-reviews">Access reviews</button><button id="audit-tab" data-view="audit">Audit log</button><button data-view="api">API console</button></nav>
+<nav aria-label="Workspace"><button data-view="inventory">Inventory</button><button data-view="issues">Issues</button><button data-view="history">Scan history</button><button data-view="relationships">Relationships</button><button data-view="boms">AI bills of materials</button><button data-view="runtime">Runtime findings</button><button data-view="syncs">Cloud syncs</button><button id="connections-tab" data-view="connections" hidden>Connections</button><button id="agents-tab" data-view="agents" hidden>Agents</button><button id="data-posture-tab" data-view="data-posture" hidden>Data posture</button><button id="access-tab" data-view="access-reviews">Access reviews</button><button id="audit-tab" data-view="audit">Audit log</button><button data-view="api">API console</button></nav>
 <section id="inventory" class="panel view">
 <h2>Asset inventory</h2><p>Checks evaluate the facts entered here. Missing facts appear as unknown.</p>
 <form id="asset" hidden>
@@ -48,16 +56,29 @@
 <section id="boms" class="panel view" hidden><h2>AI bills of materials</h2><div id="bom-list"></div><div id="bom-detail"></div></section>
 <section id="runtime" class="panel view" hidden><h2>Runtime findings</h2><div id="runtime-list"></div></section>
 <section id="access-reviews" class="panel view" hidden><h2>Access reviews</h2><div id="access-list"></div><div id="access-detail"></div></section>
+<section id="connections" class="panel view" hidden>
+<h2>Cloud connections</h2>
+<form id="connection-form">
+<label>Connection name<input id="connection-name" placeholder="e.g. AWS production account" required maxlength="80"></label>
+<label>Platform<select id="connection-provider"></select></label>
+<div id="connection-fields"></div>
+<label>Server credential profile<select id="connection-profile"></select></label>
+<p id="connection-help"></p>
+<button>Save connection</button>
+</form>
+<p>Use a credential profile configured on this server. Test connection reads provider inventory. Run scan refreshes inventory and assessments.</p>
+<div id="connection-list"></div><div id="connection-runs"></div>
+</section>
 <section id="agents" class="panel view" hidden>
 <h2>Collection agents</h2>
 <form id="agent-enroll">
-<label>Name<input id="agent-name" required maxlength="80"></label>
+<label>Name<input id="agent-name" placeholder="e.g. Production read-only collector" required maxlength="80"></label>
 <label>Platform<select id="agent-provider">
 <option value="aws">AWS</option><option value="gcs">Google Cloud Storage</option><option value="vertex">Google Vertex AI</option>
 <option value="azure">Azure Machine Learning</option><option value="oci">Oracle Cloud</option><option value="ibm">IBM Cloud</option>
 <option value="salesforce">Salesforce</option><option value="vsphere">VMware ESXi/vCenter</option>
 </select></label>
-<label>Target arguments <small id="agent-target-help"></small><input id="agent-target" required maxlength="1000"></label>
+<div id="agent-target-fields"></div>
 <label>Credential lifetime in hours<input id="agent-ttl" type="number" value="24" min="1" max="720" required></label>
 <button>Enroll agent</button>
 </form>

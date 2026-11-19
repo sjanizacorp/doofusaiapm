@@ -1,172 +1,246 @@
-# DoofusAI SPM — DoofusAI Security Posture Management
+# DoofusAI SPM v4
 
-# DISCLAIMER: This software is provided "as is" and without warranty of any kind, express or implied. In no event shall the author be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software. Any action you take based on this code is strictly at your own risk.
+**Authored by Aniza Inc.**
 
-Production-grade platform for scanning AI/ML infrastructure against OWASP LLM Top 10,
-MITRE ATLAS, NIST AI RMF, and custom policies. Dark terminal UI, pluggable check engine,
-open-source tool integrations.
+DoofusAI Security Posture Management gives security, cloud, and AI operations teams a project-based workspace for examining the configuration and relationships of AI infrastructure. It collects inventory from selected cloud and VMware services, assesses supported controls, explains findings using source evidence, and tracks remediation over time.
 
-## Architecture
+The current product is **v4**, implemented in Python with a browser console and SQLite persistence. Collection connectors can run on the central server or on additional platform-local agents. Both collection paths feed the same inventory, assessment, and reporting workflows.
 
-```
-doofusai-spm/
-├── engine/
-│   ├── checks/              # Check modules (one file per policy)
-│   │   ├── owasp-llm01.js   # Prompt injection
-│   │   ├── owasp-llm06.js   # Sensitive info / API key exposure
-│   │   ├── infra-001.js     # Unauthenticated ML endpoints
-│   │   ├── infra-002.js     # Unencrypted artefact storage
-│   │   ├── registry-001.js  # Unsigned artefacts / pickle risk
-│   │   ├── registry-002.js  # Missing SBOM / model card issues
-│   │   ├── app-001.js       # Excessive agency
-│   │   ├── app-002.js       # Insecure RAG / PII leakage
-│   │   ├── tool-detect-secrets.js
-│   │   ├── tool-garak.js
-│   │   ├── tool-llm-guard.js
-│   │   └── tool-checkov.js
-│   ├── loaders/             # Target connectors (future: live SDK integrations)
-│   ├── policy/              # Built-in YAML policies
-│   ├── custom-policies/     # Drop custom YAML/JSON here (gitignored)
-│   ├── policyLoader.js      # YAML → Zod-validated Policy objects
-│   ├── runner.js            # Worker-thread isolated check execution
-│   ├── scoring.js           # CVSS-style scoring + posture computation
-│   ├── db.js                # SQLite persistence (WAL mode)
-│   └── scanner.js           # Top-level scan orchestrator
-├── api/
-│   └── server.js            # Express REST API + OpenAPI 3.1
-├── ui/
-│   └── src/
-│       ├── App.jsx           # Full React SPA (5 screens)
-│       ├── main.jsx
-│       └── lib/api.js        # API client with mock fallback
-├── data/                    # SQLite database (gitignored)
-├── .env.example
-└── package.json
-```
+[Client deployment package](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-client.zip) · [Narrated demo](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-demo.mp4) · [Release and checksums](https://github.com/sjanizacorp/doofusaiapm/releases/tag/v4-client-2026-11-18)
 
-## Quick start
+## What teams use it for
 
-```bash
-# Requires Node.js 18+
-# No native compilation — uses sql.js (pure-JS SQLite)
- 1. Install all dependencies (run from the doofusai-spm root)
-npm install        # installs all server + engine deps at root
-cd ui && npm install && cd ..   # installs React/Vite deps
-# or just: npm run install:all
+- **Inventory and configuration reviews.** Find supported models, endpoints, agents, identities, data stores, and workload relationships, then examine their reported settings.
+- **AI security investigations.** Follow discovered configuration relationships between services, execution identities, model artifacts, and data. Review sensitivity and selected provider access decisions alongside exposure evidence.
+- **Remediation tracking.** Prioritize findings, assign owners, record time-limited exceptions, and compare assessments after a source configuration change.
+- **Controlled deployment gates.** Verify signed model manifests, enforce supported artifact policies, and run fixed behavioral checks against an approved staging model deployment.
+- **Application enforcement.** Add text screening, model authorization, registered tool mediation, or a fixed-destination JSON relay to participating applications.
+- **Distributed assessment.** Place read-only collectors near platform APIs when direct central-server access is unsuitable. Queue collections from the console or configure recurring collection.
 
-# 2. Configure environment
-cp .env.example .env
-# Edit .env — add any API keys you want to scan against
+A completed scan reports what the configured connectors and checks observed. Missing, stale, or inconclusive evidence remains visible.
 
-# 3. Start (API + UI hot-reload)
-npm run dev
+## Where it fits in an enterprise
 
-# API:  http://localhost:3001
-# UI:   http://localhost:5173
-# Docs: http://localhost:3001/api/docs
+DoofusAI sits between the organization's cloud and AI infrastructure and its security operations processes. It combines configuration observations, scoped access reviews, data classification summaries, runtime findings, and release verification in one project workspace.
+
+| Enterprise team | Typical use |
+|---|---|
+| Security and cloud security | Investigate findings, examine exposure relationships, and review exceptions and access evidence. |
+| AI engineering and MLOps | Maintain model and endpoint inventory, verify releases, and follow assessment changes after deployment updates. |
+| Cloud and virtualization operations | Configure read-only connections, operate collectors, and confirm remediation with fresh evidence. |
+| Identity administrators | Configure Entra ID or AD FS sign-in and map authorized identities to project roles. |
+| Governance and audit | Review project activity, evidence timestamps, exceptions, and signed audit exports. |
+
+Deploy the central service behind an approved HTTPS reverse proxy and network controls. Provider credentials are configured where collection runs. A platform-local agent keeps its provider credentials on its host and sends normalized inventory snapshots to the central service over outbound HTTPS.
+
+```mermaid
+flowchart LR
+    U["Users and administrators"] --> P["HTTPS ingress"]
+    I["Entra ID or AD FS"] --> P
+    P --> E["DoofusAI engine and console"]
+    E --> D["Project inventory, assessments and audit database"]
+    E --> C["Read-only provider APIs"]
+    A["Platform-local collectors"] -->|"Outbound HTTPS reports"| E
+    A --> C
+    E --> X["Audit and security-event exports"]
+    R["Applications and release pipelines"] -->|"Policy checks"| E
 ```
 
-> **Node 25 / macOS users**: this release uses `sql.js` (pure WebAssembly SQLite)
-> instead of `better-sqlite3`, so there is nothing to compile. `npm install` should
-> complete without any `node-gyp` or C++ errors regardless of your Xcode or
-> Python version.
+## Supported platforms
 
-## Scan targets
+Each connector targets an explicitly configured account, project, workspace, compartment, organization, or VMware host. Coverage varies by service.
 
-| Type | Config key | Description |
-|------|-----------|-------------|
-| `llm_api` | `system_prompt`, `model_name`, `api_key_env` | OpenAI, Anthropic, Azure, Bedrock |
-| `ai_infra` | `host`, `storage_type`, `artifact_bucket`, `sse_enabled` | MLflow, Jupyter, S3, GCS |
-| `model_registry` | `artefact_formats`, `signature_verification`, `public` | HuggingFace, MLflow Registry |
-| `ai_app` | `tools`, `vector_db`, `pii_filter_enabled`, `human_in_the_loop` | RAG, agents, chatbots |
+| Platform | Current coverage |
+|---|---|
+| **AWS** | SageMaker models and endpoints, selected Bedrock agent metadata, execution roles, artifact bucket references, model VPC attachments, and same-account ECR references. Optional Access Analyzer evidence and scoped role policy simulations. |
+| **Google Cloud** | Cloud Storage configuration, Vertex AI models, endpoints and agents, source relationships, optional imported sensitivity profiles, bucket caller permission checks, and named-account IAM troubleshooting. |
+| **Azure** | Machine Learning models and endpoints, optional Foundry agents, workspace relationships, and selected direct managed-identity RBAC evidence. |
+| **Oracle Cloud** | Data Science projects, models, and deployments. Optional deployment details provide supported model bindings and access-log configuration assessments. |
+| **IBM Cloud** | watsonx.ai space models and deployments, known model references, and deployment lifecycle assessments. |
+| **Salesforce** | Organization and Flow metadata, plus Agentforce definitions and versions through Metadata API v68 or later when enabled and authorized. |
+| **VMware ESXi / vCenter** | Hosts, VMs, datastores, and networks through the vSphere API. Checks include lockdown, VM logging, and EFI Secure Boot. Named-user privilege reviews require vCenter. |
 
-## Running a scan via API
+[Connector setup and scope limits](v4/spm/ADDONS.md)
 
-```bash
-curl -X POST http://localhost:3001/api/v1/scans \
-  -H "Content-Type: application/json" \
-  -d '{
-    "target": {
-      "type": "llm_api",
-      "name": "prod-openai-gateway",
-      "model_name": "gpt-4o",
-      "api_key_env": "OPENAI_API_KEY"
-    }
-  }'
+## Browser console
+
+Sign in with a local username/password account or a configured Entra ID or AD FS identity. Project roles control which actions are available.
+
+- **Connections** lets administrators choose a platform, fill target fields using visible examples, select a server credential profile, test access, run a scan, and review results.
+- **Inventory** and **Scan history** show assets and assessments.
+- **Issues** provides findings, risk context, assignment, exceptions, and history.
+- **Relationships** shows declared and provider-discovered topology.
+- **Data posture** shows classifications, content sample summaries, configuration exposure paths, and matching access reviews.
+- **Access reviews** shows selected provider permission evaluations and comparable changes.
+- **Agents** provides enrollment, collector download, on-demand jobs, recurring schedules, credential rotation, revocation, and run history.
+- **Audit log**, **Runtime findings**, **AI bills of materials**, and **API console** provide the corresponding evidence views.
+
+An administrator configures credential profiles on the collection server. The console displays profile names and targets while credentials remain in the server's approved environment or profile file.
+
+## Install and sign in
+
+### Client deployment package
+
+The client package requires **CPython 3.13 on Linux or macOS**. It includes compiled Python modules, browser assets, lifecycle scripts, operator instructions, and illustrated manuals.
+
+1. Download and extract the client ZIP.
+2. Open a terminal in the extracted folder.
+3. Install and start the service.
+4. Create the first local administrator account. Enter a password when prompted; entry is hidden.
+5. Open the service address and sign in with that username and password.
+
+```sh
+python3 --version
+./install.sh
+./start.sh
+./spm.sh set-local-user ModelOps alex.smith admin
+./status.sh
 ```
 
-## Custom policies
-Drop a `.yaml` file in `engine/custom-policies/`:
+The default address is http://127.0.0.1:8000 on the service host. The default installation directory is ~/.local/share/doofusai-spm. Publish an approved HTTPS address for access from other hosts.
 
-```yaml
-id: MY-CUSTOM-001
-name: My custom check
-description: What this detects.
-severity: high
-target_types: [llm_api]
-check_module: checks/my-custom-check
-enabled: true
-remediation: |
-  1. Step one.
-  2. Step two.
-framework_refs:
-  - framework: OWASP_LLM
-    id: LLM01
-tags: [custom]
+```sh
+./stop.sh
+./uninstall.sh
 ```
 
-Then create `engine/checks/my-custom-check.js`:
+Uninstall removes the installed runtime and retains data, configuration, and logs. Reinstall uses the retained state. Back up the database before replacing the runtime.
 
-```js
-const { v4: uuidv4 } = require('uuid');
+### Repository source
 
-async function run(target, config) {
-  // Return an array of Finding objects
-  return [{
-    id: uuidv4(),
-    title: 'My finding title',
-    description: 'What was found.',
-    severity: 'high',
-    confidence: 'confirmed',
-    resource: target.name,
-    evidence: 'Supporting detail',
-  }];
-}
+Current source and shell controls are under v4/. Use Python 3.13 for the tested release environment.
 
-module.exports = { id: 'MY-CUSTOM-001', name: 'My custom check', run };
+```sh
+git clone https://github.com/sjanizacorp/doofusaiapm.git
+cd doofusaiapm/v4
+./install.sh
+./start.sh
+./spm.sh set-local-user ModelOps alex.smith admin
 ```
 
-Call `POST /api/v1/policies/reload` to hot-load without restart.
+For development, run the following from v4/spm/.
 
-## Open-source tool prerequisites
-
-```bash
-pip install detect-secrets garak llm-guard checkov
+```sh
+python3 app.py --db /path/to/posture.sqlite serve
 ```
 
-Tools degrade gracefully — if not installed, they emit an `info`-severity finding
-explaining the missing dependency rather than crashing.
+A Dockerfile and Kubernetes manifests are also provided.
 
-## REST API
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/v1/scans` | Start a scan (async, returns scan_id) |
-| `GET`  | `/api/v1/scans` | List recent scans |
-| `GET`  | `/api/v1/scans/:id` | Poll status + get results |
-| `GET`  | `/api/v1/findings` | List findings (filter by severity/status/target) |
-| `PATCH`| `/api/v1/findings/:id/status` | Update finding status |
-| `GET`  | `/api/v1/reports/:scan_id` | Get posture report (JSON or summary) |
-| `GET`  | `/api/v1/policies` | List loaded policies |
-| `POST` | `/api/v1/policies/reload` | Hot-reload policies from disk |
+## Configure a connection and scan
 
-Full OpenAPI 3.1 spec: `GET /api/openapi.json`
-Interactive docs: `http://localhost:3001/api/docs`
+1. Prepare the relevant provider CLI or VMware SDK on the collection host and an approved read-only identity.
+2. Open **Connections** as a project administrator.
+3. Enter a connection name, choose the platform, and complete its account, region, project, or workspace fields.
+4. Choose **Current server identity** or a named credential profile, then select **Save connection**.
+5. Choose **Test connection** and **Refresh results** to confirm access.
+6. Choose **Run scan** and refresh the operation results.
+7. Open Inventory, Relationships, Issues, or Cloud syncs to inspect evidence.
 
-## Security design
+Testing reads provider inventory without saving it. Scanning saves inventory and supported assessments. Authentication, missing tools, and permission failures appear in operation history.
 
-- **No secrets in DB** — API keys accepted only via `api_key_env` (env var name), never stored
-- **Automatic redaction** — API keys, email addresses, phone numbers redacted before any DB write
-- **Worker thread isolation** — each check runs in its own thread with 30s timeout
-- **Policy hot-reload** — drop YAML files and reload without restart
-- **SQLite WAL mode** — concurrent reads during scan writes
-- 
+## Platform-local agents
+
+Direct server collection and additional agents are both supported. Enrolling an agent preserves direct collection for that scope.
+
+1. Prepare a host with Python, provider tooling, and a read-only platform identity.
+2. In **Agents**, select the provider and complete its labeled fields.
+3. Enroll the collector and save the one-time credential securely.
+4. Download the bundle and start its poller on the prepared host.
+5. Choose **Run now** or set **Collection frequency** and **Save frequency**.
+6. Review Run history and Cloud syncs.
+
+Supported intervals are five, fifteen, thirty, and sixty minutes, six hours, and daily. The engine dispatches due work when the running poller checks in. **On demand** disables future scheduled jobs.
+
+Agents use expiring credentials bound to a project and scope. Jobs use leases, duplicate delivery is handled safely, and failed collections preserve prior inventory. A newer successful direct sync supersedes an older in-flight agent snapshot.
+
+Initial host provisioning and starting the poller are operator deployment steps. Automatic host provisioning and change/risk-event-triggered collection remain development work.
+
+[Agent setup and CLI instructions](v4/spm/ADDONS.md#deploy-and-run-platform-local-collection-agents)
+
+## Identity and access
+
+Local passwords use salted PBKDF2 hashes. Repeated failures temporarily lock an account. Browser sessions expire after eight hours, and sign-out revokes the current session. Password resets revoke prior local sessions.
+
+Organization sign-in uses OIDC authorization-code flow with PKCE and nonce checks for a configured Entra tenant or AD FS provider. Authorized subjects are mapped to projects and roles. Provider MFA and conditional access stay with the identity provider.
+
+The current roles are viewer, operator, and administrator. Agent credentials are restricted to collection operations. Identity configuration, key rotation, HTTPS ingress, and live tenant validation are deployment responsibilities.
+
+[Identity setup](v4/OPERATOR-REFERENCE.md)
+
+## Data, access, and dependency evidence
+
+The product combines provider and operator sensitivity labels with exposure paths and matching access reviews. It preserves indeterminate provider outcomes, distinguishes conditional reviews from general access evidence, and flags stale or degraded evidence.
+
+Bounded S3 and GCS content samples identify supported email, credential, labeled U.S. SSN, and checksum-valid payment-card candidates. Reports retain signal counts and classification metadata. Sampled text is excluded from reports and audit events. Prefix scans inspect one bounded provider page and report truncation.
+
+Dependency inventory supports CycloneDX, GitHub dependency-graph imports, and offline npm lockfiles. Provider topology adds supported identity, storage, network, model, and repository relationships. The graph records observed configuration evidence; complete network reachability and cross-provider effective authorization remain open.
+
+## Model and runtime security
+
+Release controls verify signed manifests and optional independent scanner reports. Supported policies include Safetensors structure and selected numeric checks, GGUF v3 layouts, a restricted model ZIP, data-only Pickle/checkpoint profiles, and ONNX external-dependency checks. Fixed behavioral suites can gate an approved chat deployment. Artifact inspection does not deserialize the model or run inference.
+
+Runtime integration includes up to 32 configured text gateway routes, agent-bound model authorization, input/output screening, buffered SSE validation, structured JSON decisions, registered tool mediation, and a fixed-destination JSON relay.
+
+Controls apply at configured integration points. Native behavioral backdoor detection, arbitrary network interception, and broader runtime coverage remain development work.
+
+## Operations and enterprise qualification
+
+The repository includes a Dockerfile, single-writer Kubernetes deployment base, Linux service examples, protected metrics, health checks, backup verification, restore procedures, and qualification tools.
+
+The application uses SQLite with one serving writer. Plan database placement, permissions, off-volume backups, HTTPS ingress, identity integration, provider access, and representative recovery exercises. Kubernetes recovery depends on the environment's CSI volume attachment behavior and fencing.
+
+The release is a candidate for controlled enterprise pilots. Production readiness must be established against organizational workload, availability, security, and recovery requirements. Full parity with commercial AI security platforms has not been demonstrated.
+
+## Verification
+
+The current source passed **90 automated tests** with optional ONNX and SSO parsers installed. Local checks also exercised the browser and extracted client package, including installation, account creation, sign-in, logout, backup, shutdown, and reinstall with retained data.
+
+```sh
+cd v4/spm
+python3 -m pip install -r requirements-sso.txt -r requirements-onnx.txt
+python3 -m unittest discover -s tests -v
+node --check web/app.js
+```
+
+Provider and identity checks use fixtures. Live cloud accounts, live identity tenants, production-scale traffic, and physical-node failover require environment-specific validation.
+
+## Manuals and demo
+
+All manuals are authored by Aniza Inc. and include screenshots, illustrations, and step-by-step instructions.
+
+- [Administration Manual](v4/manuals/doofusai-spm-v4-administration.pdf)
+- [Configuration Manual](v4/manuals/doofusai-spm-v4-configuration.pdf)
+- [User Guide](v4/manuals/doofusai-spm-v4-user-guide.pdf)
+- [Operator reference](v4/OPERATOR-REFERENCE.md)
+- [Connector and integration procedures](v4/spm/ADDONS.md)
+- [Enterprise operations](v4/spm/ENTERPRISE-OPERATIONS.md)
+- [Kubernetes deployment](v4/spm/deploy/kubernetes/README.md)
+- [Capability roadmap](v4/ENTERPRISE-ROADMAP.md)
+- [Narrated installation → configuration → administration → user demo](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-demo.mp4)
+
+## Repository layout
+
+```text
+v4/
+  README.md
+  install.sh, start.sh, stop.sh, status.sh, uninstall.sh, spm.sh
+  lifecycle.py
+  OPERATOR-REFERENCE.md
+  ENTERPRISE-ROADMAP.md
+  manuals/
+  spm/
+    app.py
+    web/
+    tests/
+    deploy/
+    tools/
+    provider collectors, policies, agent runner and reporting modules
+v2/ and v3/
+  Previous product versions
+```
+
+Use the v4 instructions for the current product. Earlier versions retain their own architectures and setup procedures.
+
+## Software notice
+
+This software is provided "as is" and without warranty of any kind, express or implied. In no event shall the author be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software. Any action you take based on this code is strictly at your own risk.

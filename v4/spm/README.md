@@ -1,27 +1,22 @@
 # DoofusAI SPM
 Authored by Aniza Inc
 
-A local, project-scoped posture assessment service for manually recorded AI configuration and discovered Google Cloud Storage bucket settings. Requires macOS or Linux and Python 3.10+ with SQLite. The server listens on loopback.
+A project-scoped AI security posture service with a browser console, direct platform collection, additional read-only agents, assessments, access evidence, classification, and release/runtime policies. Use Python 3.13 for the tested release environment.
+
+For the complete architecture, platform coverage, enterprise use cases and deployment instructions, see the [product overview](../README.md).
+
+Run the following from this directory to create an account and start the service.
 
 ```sh
-cd spm
-python3 app.py issue "Model Operations" jules admin
+python3 app.py set-local-user ModelOps alex.smith admin
 python3 app.py serve
 ```
 
-Open http://127.0.0.1:8000 and paste the generated token. Treat it as a password. Add an asset and run an assessment. Use Unknown for facts you cannot verify. Asset IDs are visible in project reports and audit records. Keep sensitive content out of IDs.
+Open http://127.0.0.1:8000 on the service host and sign in with that username and password. Organization sign-in through Entra ID or AD FS requires provider configuration and project mappings.
 
-```sh
-python3 -m unittest discover -s tests -v
-python3 app.py backup ./posture-backup.sqlite
-python3 app.py revoke "Model Operations" jules
-```
+Use **Connections** to configure platform targets, select a server credential profile, test access and run scans. Use **Agents** to configure additional collectors and recurring collection. Provider tools and read-only permissions are required where collection runs.
 
-Use `--db PATH` before any subcommand to select a separate database. Test a backup by pointing a separate loopback instance at a copy on a different port. Backups contain credentials' hashes and assessment data and require restricted storage.
-
-The browser smoke test and manual screenshot workflow use Playwright and Chromium. Run `node tools/capture.cjs /absolute/output/directory` with Playwright resolvable through Node, and set `SPM_CHROME` to a Chromium executable when using a system browser.
-
-The Python service is a clean implementation. The upstream Node application, policy packs, data and credentials require a separately designed migration before adoption. Refer to the [gap register](../GAP-ASSESSMENT.md) for open enterprise requirements.
+Use --db PATH before a subcommand to select the database. Protect backups and verify restoration separately. The shell controls in the parent directory support installation, start, stop, status, and uninstall.
 
 ## Issue tracking and schema upgrade
 
@@ -58,9 +53,9 @@ For inventory clients, `GET /api/v1/assets` returns `next_after` when another pa
 
 ## Documentation
 
-- [Administration guide](../output/pdf/doofusai-spm-administration.pdf)
-- [User guide](../output/pdf/doofusai-spm-user-guide.pdf)
-- [API guide](../output/pdf/doofusai-spm-api-guide.pdf)
+- [Administration guide](../manuals/doofusai-spm-v4-administration.pdf)
+- [User guide](../manuals/doofusai-spm-v4-user-guide.pdf)
+- [Configuration guide](../manuals/doofusai-spm-v4-configuration.pdf)
 - [Enterprise capability roadmap](../ENTERPRISE-ROADMAP.md)
 
 ## Extended capabilities
@@ -74,3 +69,9 @@ The [Kubernetes operations guide](deploy/kubernetes/README.md) covers single-wri
 See the [Oracle Cloud, IBM Cloud, and Salesforce connector procedures](ADDONS.md#collect-oracle-cloud-ibm-cloud-and-salesforce-inventory) for setup, collection, and staging verification.
 
 The [platform-local agent deployment guide](ADDONS.md#deploy-and-run-platform-local-collection-agents) covers console enrollment, CLI installation, provider prerequisites, and on-demand collection.
+
+## Browser sign-in
+
+Create a local username/password account with `python3 app.py set-local-user ModelOps alex.smith admin`. The CLI asks for the password without echoing it. In the browser, enter that username and password and choose **Sign in**.
+
+Organization sign-in supports an Entra ID tenant or AD FS OIDC provider using `serve --sso-config sso.json`. Install `requirements-sso.txt`, register the HTTPS application root as the redirect URI, and map each authorized subject to a project using `map-identity`. See the distribution's OPERATOR-REFERENCE.md for examples and a live-tenant verification checklist.

@@ -1,0 +1,37 @@
+{
+  "schema": "doofusai.rules.v1",
+  "id": "organization",
+  "version": 1,
+  "rules": [
+    {
+      "id": "retention",
+      "title": "Storage retention",
+      "description": "Require an approved retention period.",
+      "kind": "storage",
+      "field": "retention_days",
+      "operator": "ge",
+      "expected": 90,
+      "severity": "high",
+      "remediation": "Configure at least 90 days retention.",
+      "source_url": "",
+      "tests": [
+        {
+          "facts": {
+            "retention_days": 90
+          },
+          "status": "pass"
+        },
+        {
+          "facts": {
+            "retention_days": 30
+          },
+          "status": "finding"
+        },
+        {
+          "facts": {},
+          "status": "unknown"
+        }
+      ]
+    }
+  ]
+}

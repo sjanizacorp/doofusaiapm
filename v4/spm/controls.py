@@ -212,6 +212,11 @@ def prioritize(conn, project, rows, checks):
         node = assets.get(row["asset"])
         context = cloud.get(row["asset"])
         base = next((check[4] for check in checks.get(row["kind"], ()) if check[0] == row["check_id"]), 0)
+        scan = conn.execute("SELECT result FROM scans WHERE project=? AND id=?", (project, row["last_scan"])).fetchone()
+        if scan:
+            outcome = next((o for o in json.loads(scan["result"])["outcomes"] if o["check"] == row["check_id"]), None)
+            if outcome and "policy_weight" in outcome:
+                base = outcome["policy_weight"]
         criticality = CRITICALITY[node["criticality"]] if node else 0
         exposure = 20 if node and node["id"] in exposed else 0
         if context:

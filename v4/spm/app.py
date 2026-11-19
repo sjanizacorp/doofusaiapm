@@ -51,6 +51,7 @@ import npm_inventory
 import ibm_inventory
 import oci_inventory
 import salesforce_inventory
+import check_catalog
 
 WEB = Path(__file__).with_name("web")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._:-]{0,79}")
@@ -170,6 +171,7 @@ MIGRATIONS = (
     controls.RUNTIME_TARGET_SCHEMA, ai_bom.SCHEMA, runtime_policy.SCHEMA, runtime_policy.TOOL_SCHEMA,
     aws_inventory.SCHEMA, runtime_policy.MODEL_SCHEMA, access_reviews.SCHEMA, data_posture.SCHEMA,
     data_posture.CONTENT_SCHEMA, agent_registry.SCHEMA, agent_registry.BASELINE_SCHEMA, agent_registry.SCHEDULE_SCHEMA, connections.SCHEMA, local_login.SCHEMA,
+    check_catalog.SCHEMA,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -384,7 +386,7 @@ def save_asset(conn, project, asset, kind, facts, evidence):
 
 
 def save_scan(conn, user, asset, snapshot):
-    result = assess(snapshot["kind"], snapshot["facts"])
+    result = check_catalog.assessment(conn, user["project"], snapshot["kind"], snapshot["facts"], CHECKS)
     scan = str(uuid4())
     created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
@@ -1089,7 +1091,7 @@ class Product:
         if self.issuer is not None and "." in token:
             subject = self.issuer.verify(token)
         read_only = method == "GET" or (method == "POST" and route in (
-            "/api/v1/runtime/inspect", "/api/v1/runtime/inspect-document", "/api/v1/runtime/authorize-tool", "/api/v1/runtime/authorize-model",
+            "/api/v1/runtime/inspect", "/api/v1/runtime/inspect-document", "/api/v1/runtime/authorize-tool", "/api/v1/runtime/authorize-model", "/api/v1/checks/plan",
         ))
         with database(self.path, write=not read_only) as conn:
             if read_only:
@@ -1122,8 +1124,10 @@ class Product:
                     raise Problem(403, "Credential is bound to another runtime event source.")
                 if (tool_check or model_check) and isinstance(body, dict) and body.get("agent") != user["agent_node"]:
                     raise Problem(403, "Credential is bound to another agent.")
-            if method != "GET" and user["role"] == "viewer" and route != "/api/v1/session/logout":
+            if method != "GET" and user["role"] == "viewer" and route not in ("/api/v1/session/logout", "/api/v1/checks/plan"):
                 raise Problem(403, "This credential is read-only.")
+            if route == "/api/v1/checks" or route.startswith(("/api/v1/checks/", "/api/v1/rule-packs", "/api/v1/rule-sources")):
+                return check_catalog.manage(conn, user, method, route, body, CHECKS, audit, url.query)
             if route == "/api/v1/agents" or route.startswith("/api/v1/agents/"):
                 controls.protect_admin(user)
                 if route == "/api/v1/agents/package" and method == "GET":
@@ -1182,11 +1186,15 @@ class Product:
                     ).fetchone()
                     if tracked is None:
                         raise Problem(409, "This asset identifier is reserved for the cloud connector.")
-                if not isinstance(facts, dict) or any(
-                    key not in {check[1] for check in CHECKS[kind]} or type(value) is not bool
+                builtin_fields = {check[1] for check in CHECKS[kind]}
+                custom_fields = {rule["field"] for rule in check_catalog.catalogue(conn, project, CHECKS)
+                                 if rule["kind"] == kind and rule["enabled"]}
+                if not isinstance(facts, dict) or len(facts) > 100 or any(
+                    key not in builtin_fields | custom_fields or
+                    (type(value) is not bool if key in builtin_fields else not check_catalog.scalar(value))
                     for key, value in facts.items()
                 ):
-                    raise Problem(400, "Facts must be supported boolean fields for the asset kind.")
+                    raise Problem(400, "Use supported boolean posture facts or scalar fields required by an active custom rule.")
                 evidence = {"recorded_by": user["principal"], "recorded_at": timestamp()}
                 save_asset(conn, project, asset, kind, facts, evidence)
                 audit(conn, user, "asset.saved", asset)
@@ -1543,11 +1551,13 @@ class Handler(BaseHTTPRequestHandler):
                     raise Problem(415, "Use application/json.")
                 try:
                     size = int(self.headers.get("Content-Length", "0"))
-                    size_limit = agent_protocol.MAX_REPORT if route == "/api/v1/agent/report" else 8192
+                    size_limit = (agent_protocol.MAX_REPORT if route == "/api/v1/agent/report" else
+                                  check_catalog.MAX_PACK if route in ("/api/v1/rule-packs/stage", "/api/v1/rule-packs/validate", "/api/v1/rule-packs/preview") else
+                                  16384 if route == "/api/v1/rule-sources" else 8192)
                     if not 0 < size <= size_limit:
                         raise Problem(400, f"Supply a JSON body of 1–{size_limit} bytes.")
                     raw = self.rfile.read(size)
-                    if route in ("/api/v1/runtime/inspect-document", "/api/v1/runtime/relay", "/api/v1/agent/report"):
+                    if route in ("/api/v1/runtime/inspect-document", "/api/v1/runtime/relay", "/api/v1/agent/report", "/api/v1/rule-packs/stage", "/api/v1/rule-packs/validate", "/api/v1/rule-packs/preview"):
                         body = verification.parse_json(raw)
                     else:
                         body = json.loads(raw)
@@ -1623,6 +1633,17 @@ def main():
     serve.add_argument("--sso-config", type=Path, help="Entra ID or AD FS OIDC sign-in configuration")
     serve.add_argument("--issuer-config", type=Path, help="Trusted RFC 9068 issuer configuration")
     serve.add_argument("--metrics-token-file", type=Path, help="Enable the protected Prometheus endpoint")
+    rules = commands.add_parser("rules", help="Catalogue, validate, stage, activate and update versioned posture checks")
+    rules.add_argument("project")
+    rules.add_argument("action", choices=("catalogue", "export", "validate", "stage", "activate", "setting", "source", "update", "plan", "preview", "sign"))
+    rules.add_argument("--file", type=Path, help="Rule pack or source JSON input")
+    rules.add_argument("--id", help="Pack ID, source ID or full catalogue ID")
+    rules.add_argument("--version", type=int, help="Retained version to activate; zero removes the override")
+    rules.add_argument("--enabled", choices=("yes", "no"))
+    rules.add_argument("--reason")
+    rules.add_argument("--asset")
+    rules.add_argument("--private-key", type=Path, help="Publisher private key for offline feed signing")
+    rules.add_argument("--output", type=Path, help="Destination signed feed JSON")
     mapping = commands.add_parser("map-identity")
     mapping.add_argument("issuer")
     mapping.add_argument("subject")
@@ -1848,7 +1869,64 @@ def main():
         parser.exit(1, f"Federation configuration invalid: {error}\n")
     if args.command != "serve":
         initialize(args.db)
-    if args.command == "issue":
+    if args.command == "rules":
+        try:
+            project = identifier(args.project)
+            user = {"project": project, "principal": "local-cli", "role": "admin"}
+            if args.action == "update":
+                if not args.id:
+                    raise Problem(400, "Supply --id for the source to check.")
+                result = check_catalog.update_source(args.db, project, args.id, CHECKS, database, audit)
+                print(json.dumps(result))
+                if result["status"] == "error":
+                    raise SystemExit(1)
+                return
+            body = None
+            if args.action in ("validate", "stage", "source", "preview", "sign"):
+                if not args.file:
+                    raise Problem(400, "Supply --file with a JSON document.")
+                body = verification.parse_json(verification.read_limited(args.file, check_catalog.MAX_PACK))
+            if args.action == "sign":
+                import base64
+                if not args.private_key or not args.output:
+                    raise Problem(400, "Signing requires --private-key and --output.")
+                check_catalog.validate_pack(body, CHECKS)
+                signature = verification.signed_command(["-sign", str(args.private_key.resolve())], check_catalog.canonical(body))
+                envelope = {"payload": body, "signature": base64.b64encode(signature).decode()}
+                if len(check_catalog.canonical(envelope)) > check_catalog.MAX_PACK:
+                    raise Problem(400, "Signed feed exceeds the one MiB limit.")
+                with args.output.open("xb") as destination:
+                    destination.write(check_catalog.canonical(envelope))
+                print(json.dumps({"signed": True, "id": body["id"], "version": body["version"], "output": str(args.output)}))
+                return
+            if args.action == "preview":
+                body = {"pack": body, "asset": args.asset}
+            if args.action == "activate":
+                body = {"id": args.id, "version": args.version}
+            if args.action == "setting":
+                body = {"id": args.id, "enabled": args.enabled == "yes" if args.enabled else None, "reason": args.reason}
+            if args.action == "plan":
+                body = {"asset": args.asset}
+            routes = {"catalogue": ("GET", "/api/v1/checks"), "export": ("GET", "/api/v1/rule-packs"),
+                      "validate": ("POST", "/api/v1/rule-packs/validate"), "stage": ("POST", "/api/v1/rule-packs/stage"),
+                      "activate": ("POST", "/api/v1/rule-packs/activate"), "setting": ("POST", "/api/v1/checks/setting"),
+                      "source": ("POST", "/api/v1/rule-sources"), "plan": ("POST", "/api/v1/checks/plan"),
+                      "preview": ("POST", "/api/v1/rule-packs/preview")}
+            with database(args.db, write=args.action not in ("catalogue", "export", "plan")) as conn:
+                if args.action == "export" and args.id == "builtin" and args.version in (None, 1):
+                    result = check_catalog.baseline(CHECKS)
+                elif args.action == "export" and args.id:
+                    row = conn.execute("SELECT document FROM rule_packs WHERE project=? AND id=? AND version=?", (project, args.id, args.version)).fetchone()
+                    if row is None:
+                        raise Problem(404, "Select a retained pack --id and --version.")
+                    result = json.loads(row["document"])
+                else:
+                    method, route = routes[args.action]
+                    _, result = check_catalog.manage(conn, user, method, route, body, CHECKS, audit)
+            print(json.dumps(result))
+        except (Problem, OSError, ValueError) as error:
+            parser.exit(1, f"Rule operation failed: {error}\n")
+    elif args.command == "issue":
         delta = timedelta(minutes=args.ttl_minutes) if args.ttl_minutes else timedelta(hours=args.ttl_hours or 720)
         expires = datetime.now(timezone.utc) + delta
         print(issue(args.db, args.project, args.principal, args.role,
@@ -2081,7 +2159,12 @@ def main():
                     server.metrics_token = metrics_token
                     signal.signal(signal.SIGTERM, lambda *_: Thread(target=server.shutdown, daemon=True).start())
                     print(f"DoofusAI SPM · http://{args.listen_address}:{server.server_port}", flush=True)
-                    server.serve_forever()
+                    updater = check_catalog.Updater(args.db, CHECKS, database, audit)
+                    updater.start()
+                    try:
+                        server.serve_forever()
+                    finally:
+                        updater.close()
         except (OSError, ValueError, Problem) as error:
             parser.exit(1, f"Service start failed: {error}\n")
 

@@ -372,8 +372,20 @@ function showReport(scan) {
     evidence.textContent += " · Recorded by " + recorded_by + " · " + new Date(recorded_at).toLocaleString();
   }
   byId("report").replaceChildren(title, description, evidence, ...result.outcomes.map(
-    (item) => row(item.field + " · " + item.status + (item.status === "finding" ? " · " + item.remediation : ""))
+    (item) => row(item.field + " · " + item.status + " · observed " + JSON.stringify(item.observed) +
+      " · expected " + JSON.stringify(item.expected) + (item.status === "finding" ? " · " + item.remediation : ""))
   ));
+  if (result.execution) {
+    const detail = document.createElement("details");
+    const heading = document.createElement("summary");
+    heading.textContent = "Check execution record · " + result.counts.pass + " passed · " + result.counts.finding +
+      " findings · " + result.counts.unknown + " unknown · " + result.counts.skipped + " skipped · " + result.counts.disabled + " disabled";
+    detail.append(heading, ...result.execution.map((item) =>
+      row(item.id + " · revision " + item.version + " · " + item.status + " · " + item.reason)));
+    byId("report").append(detail);
+  } else {
+    byId("report").append(row("Legacy report: a complete rule execution record was not recorded by this release."));
+  }
 }
 
 async function loadIssues() {
@@ -591,6 +603,7 @@ async function navigate(view) {
     else tab.removeAttribute("aria-current");
   }
   if (view === "inventory") await loadInventory();
+  if (view === "checks") await loadChecks();
   if (view === "history") {
     const { data } = await call("/api/v1/scans");
     byId("report").replaceChildren();
@@ -789,7 +802,8 @@ byId("kind").onchange = fillFacts;
 fillFacts();
 byId("issue-filter").onsubmit = perform(loadIssues);
 byId("asset").onsubmit = perform(async () => {
-  const facts = {};
+  const facts = JSON.parse(byId("custom-facts").value || "{}");
+  if (!facts || Array.isArray(facts) || typeof facts !== "object") throw Error("Additional facts must be a JSON object.");
   for (const field of byId("facts").querySelectorAll("select")) {
     if (field.value) facts[field.name] = field.value === "true";
   }
@@ -803,3 +817,134 @@ byId("api-form").onsubmit = perform(async () => {
   output.textContent = "HTTP " + status + "\n" + JSON.stringify(data, null, 2);
   output.hidden = false;
 });
+
+let checkRows = [];
+function downloadJSON(name, value) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], {type: "application/json"}));
+  const link = document.createElement("a");
+  link.href = url; link.download = name; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function renderChecks() {
+  const search = byId("check-search").value.toLowerCase();
+  const kind = byId("check-kind-filter").value;
+  const rows = checkRows.filter((r) => (!kind || r.kind === kind) && JSON.stringify(r).toLowerCase().includes(search));
+  byId("check-list").replaceChildren(row(rows.length + " of " + checkRows.length + " checks"), ...rows.map((r) => {
+    const detail = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = r.title + " · " + r.severity + " · " + (r.enabled ? "Enabled" : "Disabled");
+    const metadata = document.createElement("pre");
+    metadata.textContent = JSON.stringify({id: r.catalogue_id, pack: r.pack, revision: r.version, asset_kind: r.kind,
+      description: r.description, required_fact: r.field, operator: r.operator, expected: r.expected,
+      remediation: r.remediation, reference: r.source_url, disabled_reason: r.disabled_reason,
+      regression_fixtures: r.tests}, null, 2);
+    detail.append(summary, metadata);
+    if (r.source_url) {
+      const reference = document.createElement("a");
+      reference.textContent = "Open source reference"; reference.href = r.source_url;
+      reference.target = "_blank"; reference.rel = "noopener noreferrer"; detail.append(reference);
+    }
+    if (user.role === "admin") {
+      const form = document.createElement("form");
+      const label = document.createElement("label"); label.textContent = "Reason for changing check state";
+      const reason = document.createElement("input"); reason.required = true; reason.maxLength = 500;
+      reason.placeholder = "e.g. Exception approved under change CHG-123"; label.append(reason);
+      const button = document.createElement("button"); button.textContent = r.enabled ? "Disable check" : "Enable check";
+      form.append(label, button); form.onsubmit = perform(async () => {
+        await call("/api/v1/checks/setting", {id: r.catalogue_id, enabled: !r.enabled, reason: reason.value});
+        await loadChecks();
+      }); detail.append(form);
+    }
+    return detail;
+  }));
+}
+async function loadChecks() {
+  const {data} = await call("/api/v1/checks");
+  checkRows = data.checks;
+  const selected = byId("check-kind-filter").value;
+  byId("check-kind-filter").replaceChildren(new Option("All kinds", ""), ...data.kinds.map((v) => new Option(v, v)));
+  byId("check-kind-filter").value = selected;
+  const previousKind = byId("custom-kind").value;
+  const previousOperator = byId("custom-operator").value;
+  byId("custom-kind").replaceChildren(...data.kinds.map((v) => new Option(v, v)));
+  byId("custom-operator").replaceChildren(...data.operators.map((v) => new Option(v, v)));
+  byId("custom-kind").value = previousKind || "storage";
+  byId("custom-operator").value = previousOperator || "ge";
+  byId("check-admin").hidden = user.role !== "admin";
+  renderChecks();
+  if (user.role === "admin") {
+    await loadRulePacks();
+    await loadRuleSources();
+  }
+}
+async function loadRulePacks(before = "") {
+  const {data: packs} = await call("/api/v1/rule-packs" + (before ? "?before=" + before : ""));
+    byId("pack-list").replaceChildren(...packs.packs.map((p) => {
+      const entry = document.createElement("div");
+
+      entry.append(row(p.id + " · revision " + p.version + " · " + (p.active ? "Active" : "Retained") +
+        " · SHA256 " + p.digest + " · " + (p.verified_source ? "Verified feed: " + p.verified_source : "Local administrator import")));
+      entry.append(row("", "Export / edit", async () => {
+        const {data: packDocument} = await call("/api/v1/rule-packs/" + encodeURIComponent(p.id) + "/" + p.version);
+        byId("pack-json").value = JSON.stringify(packDocument, null, 2);
+        downloadJSON(p.id + "-v" + p.version + ".json", packDocument);
+      }));
+      entry.append(row("", p.active ? "Deactivate pack" : "Activate / roll back to this revision", async () => {
+        await call("/api/v1/rule-packs/activate", {id: p.id, version: p.active ? 0 : p.version});
+        await loadChecks();
+      }));
+      return entry;
+    }));
+  if (before) byId("pack-list").append(row("", "Newest revisions", () => loadRulePacks()));
+  if (packs.next_before) byId("pack-list").append(row("", "Older revisions", () => loadRulePacks(packs.next_before)));
+}
+async function loadRuleSources() {
+  const {data} = await call("/api/v1/rule-sources");
+  byId("rule-source-list").replaceChildren(...data.sources.map((source) => {
+    const entry = document.createElement("div");
+    entry.append(row(source.id + " · " + source.mode + " · next check " + source.next_check + " · " + source.last_status));
+    entry.append(row("", "Edit source", () => {
+      for (const [field, value] of [["id", source.id], ["url", source.url], ["key", source.public_key],
+        ["mode", source.mode], ["interval", source.interval_minutes]]) byId("rule-source-" + field).value = value;
+    }));
+    if (source.mode !== "disabled") entry.append(row("", "Check now", async () => {
+      await call("/api/v1/rule-sources/check", {id: source.id}); await loadRuleSources();
+    }));
+    return entry;
+  }));
+}
+byId("check-search").oninput = renderChecks;
+byId("check-kind-filter").onchange = renderChecks;
+byId("check-plan-form").onsubmit = perform(async () => {
+  const {data} = await call("/api/v1/checks/plan", {asset: byId("check-plan-asset").value});
+  byId("check-plan-result").replaceChildren(row("Planned rule-set SHA256: " + data.policy_version),
+    ...data.plan.map((r) => row(r.id + " · revision " + r.version + " · " + r.status + " · " + r.reason)));
+});
+byId("custom-check-form").onsubmit = perform(async () => {
+  const value = (id) => byId("custom-" + id).value;
+  const pack = {schema: "doofusai.rules.v1", id: value("pack"), version: Number(value("version")), rules: [{
+    id: value("id"), title: value("title"), description: value("description"), kind: value("kind"),
+    field: value("field"), operator: value("operator"), expected: JSON.parse(value("expected")), severity: value("severity"),
+    remediation: value("remediation"), source_url: value("source"), tests: JSON.parse(value("tests"))}]};
+  const {data} = await call("/api/v1/rule-packs/stage", pack);
+  byId("rule-operation-result").textContent = JSON.stringify(data, null, 2) + "\nStaged. Review and activate the revision below.";
+  await loadChecks();
+});
+byId("pack-import-form").onsubmit = (event) => perform(async () => {
+  const action = event.submitter.value;
+  const pack = JSON.parse(byId("pack-json").value);
+  const {data} = await call("/api/v1/rule-packs/" + action, action === "preview" ? {pack, asset: byId("pack-preview-asset").value} : pack);
+  byId("rule-operation-result").textContent = JSON.stringify(data, null, 2);
+  await loadChecks();
+})(event);
+byId("export-builtin").onclick = perform(async () => {
+  const {data} = await call("/api/v1/rule-packs/builtin");
+  byId("pack-json").value = JSON.stringify(data, null, 2); downloadJSON("builtin-v1.json", data);
+});
+byId("rule-source-form").onsubmit = perform(async () => {
+  const {data} = await call("/api/v1/rule-sources", {id: byId("rule-source-id").value, url: byId("rule-source-url").value,
+    public_key: byId("rule-source-key").value, mode: byId("rule-source-mode").value,
+    interval_minutes: Number(byId("rule-source-interval").value)});
+  byId("rule-operation-result").textContent = JSON.stringify(data, null, 2); await loadRuleSources();
+});
+byId("refresh-rule-sources").onclick = perform(loadRuleSources);

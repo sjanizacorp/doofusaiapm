@@ -23,9 +23,20 @@ class InstallationTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Installation directory [", result.stdout)
             self.assertTrue((directory / ".doofusai-spm-installation").exists())
+            self.assertIn("[5/5]", result.stdout)
+            self.assertIn("set-local-user ModelOps alex.smith admin", result.stdout)
+            self.assertIn(str(directory / "data/posture.sqlite"), result.stdout)
+            self.assertIn("Passwords are not stored in readable form", result.stdout)
+            self.assertIn("No default administrator or password", result.stdout)
             status = self.invoke("status", "--installdir", directory)
             self.assertEqual(status.returncode, 3)
             self.assertIn("Stopped", status.stdout)
+            self.assertIn(str(directory / "bin/start.sh"), status.stdout)
+            removed = self.invoke("uninstall", "--installdir", directory)
+            self.assertEqual(removed.returncode, 0, removed.stderr)
+            self.assertIn("[3/3] Uninstall complete", removed.stdout)
+            self.assertIn("--installdir", removed.stdout)
+            self.assertTrue((directory / "config/service.json").exists())
 
     def test_explicit_directory_has_no_prompt_and_reinstall_preserves_state(self):
         with TemporaryDirectory() as root:

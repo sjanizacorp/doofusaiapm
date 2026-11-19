@@ -6,7 +6,7 @@ DoofusAI Security Posture Management is a self-hosted application for reviewing 
 
 The central engine combines supported cloud and VMware inventory with configuration assessments, data sensitivity evidence, selected access reviews and runtime findings. Administrators can collect directly from the server or add platform-local agents that report over HTTPS. Both collection methods feed the same workspace; adding an agent preserves direct server collection.
 
-[Download the client package](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-client.zip) or [watch the product demo](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-demo.mp4). The 3-minute, 33-second narrated walkthrough covers installation, configuration, administration and user workflows, with explanatory captions and background music.
+[Download the client package](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-client.zip) or [watch the product demo](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-demo.mp4). The narrated walkthrough covers installation, configuration, administration and user workflows, with explanatory captions and background music.
 
 ## What you can do with DoofusAI
 
@@ -14,6 +14,7 @@ The central engine combines supported cloud and VMware inventory with configurat
 - **Investigate configuration risk.** Follow supported relationships among models, endpoints, agents, execution identities, storage, networks and repositories. Review sensitivity labels and selected access decisions alongside configuration exposure evidence.
 - **Track remediation.** Review issues, prioritize work, assign owners, record time-limited exceptions and compare findings after configuration changes. Export supported security events and signed audit records for downstream review.
 - **Review data protection evidence.** Combine imported sensitivity classifications and operator labels with bounded S3 and Google Cloud Storage content samples. Supported detectors identify email, credential, labeled U.S. SSN and checksum-valid payment-card candidates; sampled text is excluded from reports and audit events.
+- **Know and manage your posture checks.** Browse the check catalogue, inspect evidence requirements, plan scans and read exact rule execution records. Administrators can build custom declarative checks, test and preview them, stage versioned packs, activate or roll back revisions and configure signed HTTPS update feeds.
 - **Check model releases.** Verify signed manifests and optional external scanner reports, inspect supported artifact formats and run fixed behavioral checks against an approved staging deployment. Apply supported policies in release pipelines.
 - **Protect participating applications.** Integrate text screening, model authorization, registered tool mediation or a fixed-destination JSON relay. Controls apply where the application or gateway has been configured to use them.
 - **Collect from distributed environments.** Enroll platform-local collectors, download their bundles, queue on-demand work, configure recurring collection and review run history. Provider credentials stay on the collection host.
@@ -72,6 +73,16 @@ Service and SSO settings reside in `config/`. Cloud credentials are configured s
 4. Choose **Run scan** and refresh the operation results. Scanning saves supported inventory and assessments; tool, permission and authentication failures appear in operation history.
 5. Open **Inventory**, choose the connection’s object set and inspect assets. Use **Relationships**, **Issues**, **Data posture**, **Access reviews** and **Scan history** to investigate available evidence and follow-up work.
 
+## Browse, customize and update checks
+
+Open **Checks & policies** to search the 19 shipped posture checks and inspect their applicability, expected values, evidence requirements, remediation, reference links and revision. Plan a scan for an existing asset before running it. New scan reports preserve the configured catalogue digest and an execution record showing evaluated, skipped and disabled rules; missing or incompatible evidence is unknown.
+
+Administrators can use the custom-check builder or import a JSON pack. Rules use typed comparisons against collected facts; they do not execute uploaded code or discover new provider fields. Validate regression fixtures, preview against saved inventory, stage the candidate and activate its revision. Export a pack to edit it, preserve its other rules and increase the version. Retained versions support explicit rollback. Disabling a check does not resolve existing findings.
+
+For online updates, configure a trusted publisher's direct public HTTPS feed and independently obtained public key. The running service checks due sources at the configured interval. Notify, stage and automatic activation modes are available. Signature, schema, regression-fixture, immutable-version and downgrade checks protect updates. A new feed revision cannot silently overwrite a retained revision or undo an operator rollback by repeating the same version.
+
+No public Aniza update feed is bundled. Vendor web pages and native vendor policy definitions are not directly executable packs; a publisher must map supported guidance to the collected evidence model and publish tested normalized rules. The [Checks & API Guide](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-checks-api.pdf) covers these workflows and the CLI/API.
+
 ## Add platform-local collectors
 
 In **Agents**, choose a platform, complete its scope fields and enroll the collector. Save its one-time credential securely, download the bundle and start the poller on a prepared host. Then use **Run now** or configure a recurring frequency from five minutes to daily. Review **Run history** and **Cloud syncs** for results.
@@ -93,6 +104,7 @@ All manuals are authored by Aniza Inc. and contain screenshots, illustrations an
 - [Administration Manual](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-administration.pdf): installation, administrator setup, access, backup, recovery and lifecycle controls.
 - [Configuration Manual](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-configuration.pdf): installation layout, connectivity, provider identities, sign-in and agents.
 - [User Guide](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-user-guide.pdf): sign-in, inventory, scans, issues and evidence review.
+- [Checks & API Guide](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-checks-api.pdf): catalogue, custom checks, fixtures, preview, revision management, signed feeds and API procedures.
 - [Narrated product demo](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-demo.mp4): installation, configuration, administration and user workflows.
 - [Release files and checksums](https://github.com/sjanizacorp/doofusaiapm/releases/tag/v4-client-2026-11-18): downloads and integrity checks.
 
@@ -100,7 +112,7 @@ The client archive excludes Markdown files, Python source, development tests and
 
 ## Validation and current limits
 
-The source previously passed 93 automated tests with the optional ONNX and SSO dependencies installed. The latest lifecycle changes passed 10 lifecycle checks and an extracted-client test covering installation, startup, health, agent download, backup, shutdown, uninstall and reinstall with retained state. These are local and fixture-based results.
+The source passed 103 automated tests with the optional ONNX and SSO dependencies installed. The latest lifecycle changes passed 10 lifecycle checks and an extracted-client test covering installation, startup, health, agent download, backup, shutdown, uninstall and reinstall with retained state. These are local and fixture-based results.
 
 Live provider accounts, live identity tenants, production-scale traffic and physical-node failover require deployment-specific testing. Broader service discovery, comprehensive cross-provider access analysis, native behavioral model threat detection and wider runtime enforcement remain areas for further development. The current release is suitable for evaluation in a controlled enterprise pilot; full commercial-platform parity and production readiness have not been demonstrated.
 

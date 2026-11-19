@@ -27,6 +27,11 @@ if runtime.suffix == ".pyc":
 ' "$runner" >/dev/null 2>&1
 }
 
+# Installed controls use their own environment first.
+if [ -f "$here/../.doofusai-spm-installation" ] && compatible "$here/../venv/bin/python"; then
+    exec "$here/../venv/bin/python" -B "$runner" "$@"
+fi
+
 if [ -n "${DOOFUS_PYTHON:-}" ]; then
     if compatible "$DOOFUS_PYTHON"; then
         exec "$DOOFUS_PYTHON" -B "$runner" "$@"

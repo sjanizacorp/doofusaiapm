@@ -5,6 +5,8 @@ import os
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
+import lifecycle
 
 HERE = Path(__file__).resolve().parent
 
@@ -31,11 +33,21 @@ class InstallationTest(unittest.TestCase):
             first = self.invoke("install", "--installdir", directory)
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertNotIn("Installation directory [", first.stdout)
+            interpreter = directory / "venv" / "bin" / "python"
+            details = subprocess.check_output(
+                [str(interpreter), "-c", "import sys;print(sys.version_info[:2]);print(sys.prefix != sys.base_prefix)"],
+                text=True,
+            )
+            self.assertIn("(3, 13)", details)
+            self.assertIn("True", details)
+            retained = directory / "venv" / "retained-package-marker"
+            retained.write_text("Keep installed packages")
             data = directory / "data" / "preserved.txt"
             data.write_text("Retain this state")
             second = self.invoke("install", "--prefix", directory)
             self.assertEqual(second.returncode, 0, second.stderr)
             self.assertEqual(data.read_text(), "Retain this state")
+            self.assertEqual(retained.read_text(), "Keep installed packages")
 
     def test_enter_accepts_the_displayed_default(self):
         with TemporaryDirectory() as root:
@@ -45,6 +57,18 @@ class InstallationTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(f"Installation directory [{directory}]", result.stdout)
             self.assertTrue((directory / ".doofusai-spm-installation").exists())
+
+    def test_failed_environment_creation_can_be_retried(self):
+        with TemporaryDirectory() as root:
+            directory = Path(root) / "retry-install"
+            with patch("lifecycle.venv.EnvBuilder.create", side_effect=OSError("fixture failure")):
+                with self.assertRaisesRegex(ValueError, "Could not create"):
+                    lifecycle.install(directory, None, None)
+            self.assertTrue((directory / lifecycle.MARK).is_file())
+            self.assertFalse((directory / "venv").exists())
+            result = self.invoke("install", "--installdir", directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((directory / "venv" / "bin" / "python").exists())
 
     def test_nonempty_directory_is_rejected(self):
         with TemporaryDirectory() as root:

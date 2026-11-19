@@ -108,3 +108,12 @@ The installer preserves data and configuration when reinstalling in an existing 
 ## Python compatibility
 
 Lifecycle scripts check the Python version and compiled runtime compatibility before starting. They prefer python3.13 and check standard Python 3.13 locations. If your default python3 is 3.9, 3.14, or 3.15, it will not be used for the compiled client. For a custom installation use `DOOFUS_PYTHON=/path/to/python3.13 ./install.sh`. An explicit incompatible override is rejected with a setup message.
+
+
+## Installation virtual environment
+
+Installation creates a dedicated CPython 3.13 environment at <installation>/venv. The service and product CLI run with that environment, including when launched from the extracted package using --installdir. You do not need to activate it manually. Reinstall reuses the environment and preserves its installed packages; uninstall removes the environment while retaining data, configuration, and logs.
+
+Install optional Python integrations into this environment. For example, run `"/path/to/installation/venv/bin/python" -m pip install -r "/path/to/installation/runtime/requirements-sso.txt"` to enable OIDC sign-in. VMware and ONNX have their own requirements files in the same runtime folder. Provider command-line tools retain their normal installation and credential setup.
+
+A virtual environment uses the selected Python 3.13 installation. Keep that base interpreter installed. If Python 3.13 is unavailable, the launcher explains how to select it before installation can continue.

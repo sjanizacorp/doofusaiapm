@@ -10,6 +10,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import venv
 from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 
@@ -72,6 +73,40 @@ def settings(home):
     return json.loads((home / "config" / "service.json").read_text())
 
 
+def virtual_python(home):
+    executable = home / "venv" / "bin" / "python"
+    if not executable.is_file():
+        raise ValueError("The installation virtual environment is missing. Run install.sh for this directory.")
+    try:
+        result = subprocess.run(
+            [str(executable), "-c",
+             "import json,sys;print(json.dumps([sys.implementation.name,list(sys.version_info[:2]),"
+             "sys.prefix,sys.base_prefix]))"],
+            check=True, capture_output=True, text=True, timeout=10,
+        )
+        implementation, version, prefix, base = json.loads(result.stdout)
+        if (implementation != "cpython" or version != [3, 13]
+                or Path(prefix).resolve() != (home / "venv").resolve() or prefix == base):
+            raise ValueError()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        raise ValueError("The virtual environment is incompatible or damaged. Repair it before starting the product.") from None
+    return executable
+
+
+def prepare_virtual_environment(home):
+    environment = home / "venv"
+    if environment.exists():
+        return virtual_python(home)
+    print("Creating a Python 3.13 virtual environment in " + str(environment), flush=True)
+    try:
+        venv.EnvBuilder(with_pip=True, symlinks=True).create(environment)
+        return virtual_python(home)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        if environment.exists():
+            shutil.rmtree(environment)
+        raise ValueError("Could not create the Python 3.13 virtual environment. Check disk access and Python's venv/ensurepip support.") from None
+
+
 def start(home):
     existing = current_process(home)
     if existing:
@@ -80,7 +115,7 @@ def start(home):
     config = settings(home)
     app = runtime_file(home / "runtime", "app")
     listen = config["listen_address"]
-    command = [sys.executable, "-B", "-u", str(app), "--db", str(home / "data" / "posture.sqlite"),
+    command = [str(virtual_python(home)), "-B", "-u", str(app), "--db", str(home / "data" / "posture.sqlite"),
                "serve", "--listen-address", listen, "--port", str(config["port"])]
     for flag, name in (("--issuer-config", "issuer.json"), ("--sso-config", "sso.json"), ("--metrics-token-file", "metrics.token"),
                        ("--chat-gateway-config", "gateway.json"), ("--relay-config", "relay.json")):
@@ -131,7 +166,7 @@ def install(home, port, listen):
                    if (path / "app.py").is_file() or (path / "app.pyc").is_file()), None)
     if source is None:
         raise ValueError("Run install.sh from an extracted DoofusAI package.")
-    if (source / "app.pyc").exists() and (sys.implementation.name != "cpython" or sys.version_info[:2] != (3, 13)):
+    if sys.implementation.name != "cpython" or sys.version_info[:2] != (3, 13):
         raise ValueError("The client runtime requires CPython 3.13.")
     if home.exists() and not (home / MARK).is_file() and any(home.iterdir()):
         raise ValueError("Choose an empty installation directory.")
@@ -139,6 +174,8 @@ def install(home, port, listen):
     with locked(home):
         if current_process(home):
             raise ValueError("Stop the service before replacing the installed runtime.")
+        (home / MARK).touch()
+        prepare_virtual_environment(home)
         for name in ("data", "logs", "config", "bin"):
             (home / name).mkdir(mode=0o700, exist_ok=True)
         if not (home / "config" / "service.json").exists() or port is not None or listen is not None:
@@ -209,6 +246,10 @@ def main():
             install(home, args.port, args.listen_address)
             return 0
         installed(home)
+        if command in ("start", "spm"):
+            executable = virtual_python(home)
+            if os.path.abspath(sys.executable) != os.path.abspath(executable):
+                os.execv(str(executable), [str(executable), "-B", str(Path(__file__)), *sys.argv[1:]])
         if command == "spm":
             app = runtime_file(home / "runtime", "app")
             os.execv(sys.executable, [sys.executable, "-B", str(app), "--db",
@@ -231,6 +272,8 @@ def main():
                     shutil.rmtree(home / "runtime")
                 if (home / "bin").exists():
                     shutil.rmtree(home / "bin")
+                if (home / "venv").exists():
+                    shutil.rmtree(home / "venv")
                 print(f"Uninstalled. Data, configuration, and logs are retained in {home}.")
         return 0
     except (OSError, ValueError, KeyError) as error:

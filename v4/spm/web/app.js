@@ -498,22 +498,89 @@ async function loadIssues() {
   }
 }
 
+let inventorySet = "all";
+let inventoryRequest = 0;
+byId("inventory-set").onchange = perform(async () => {
+  inventorySet = byId("inventory-set").value;
+  await loadInventory();
+});
 async function loadInventory(after = "") {
-  const { data } = await call("/api/v1/assets?after=" + encodeURIComponent(after));
-  const entries = data.assets.map((asset) => {
-    if (asset.source) {
-      const state = asset.source.active ? "Last observed " + asset.source.last_seen : "No longer discovered";
-      const provider = ({ vertex: "Google AI endpoint", aws: "AWS IAM role", azure: "Azure AI", oci: "OCI Data Science", ibm: "IBM watsonx.ai", vsphere: "VMware vSphere", gcs: "Google Cloud Storage" }[asset.source.provider] ?? "Cloud asset");
-      return row(asset.source.name + " · " + provider + " · " + state);
+  const request = ++inventoryRequest;
+  const { data: choices } = await call("/api/v1/inventory/sets");
+  if (request !== inventoryRequest) return;
+  const selector = byId("inventory-set");
+  selector.replaceChildren(...choices.sets.map((set) => new Option(set.name, set.id)));
+  if (!choices.sets.some((set) => set.id === inventorySet)) inventorySet = "all";
+  selector.value = inventorySet;
+  const selected = inventorySet;
+  const base = "/api/v1/inventory/objects?set=" + encodeURIComponent(selected);
+  const { data } = await call(base + "&after=" + encodeURIComponent(after));
+  if (request !== inventoryRequest) return;
+  byId("inventory-detail").replaceChildren();
+  byId("asset").hidden = user.role === "viewer" || !["all", "manual"].includes(selected);
+  byId("inventory-set-info").textContent = data.total + " object(s) · " + (data.set.scope ?
+    data.set.provider.toUpperCase() + " · " + data.set.scope : data.set.name);
+  const entries = data.objects.map((asset) => {
+    const entry = document.createElement("div");
+    entry.append(row([asset.name, asset.kind, asset.provider,
+      asset.active ? "Observed " + asset.observed_at : "No longer discovered",
+      asset.assessment ? "Assessment available" : "No applicable assessment recorded",
+    ].filter(Boolean).join(" · "), "View object", async () => {
+      const { data } = await call(base + "&object=" + encodeURIComponent(asset.id));
+      if (selected !== inventorySet) return;
+      const item = data.object;
+      const heading = document.createElement("h3");
+      heading.textContent = item.name;
+      const metadata = document.createElement("pre");
+      metadata.textContent = JSON.stringify({
+        id: item.id, provider: item.provider, resource: item.resource, kind: item.kind,
+        scope: item.scope, observed_at: item.observed_at, active: item.active,
+        exposure: item.exposure, sensitivity: item.sensitivity,
+        sensitivity_observed_at: item.profile_observed, facts: item.facts,
+        collection_evidence: item.evidence, latest_collection: item.latest_collection,
+      }, null, 2);
+      const relationships = item.relationships.map((edge) =>
+        row(edge.origin_name + " → " + edge.relation + " → " + edge.target_name));
+      if (!relationships.length) relationships.push(row("No relationships collected for this object."));
+      if (item.relationships_truncated) relationships.push(row("Showing the first 500 relationships."));
+      const summary = document.createElement("div");
+      for (const [label, value] of [
+        ["Provider", item.provider ?? "Manual entry"], ["Object type", item.kind],
+        ["Provider resource", item.resource], ["Account / workspace scope", item.scope ?? "Manual inventory"],
+        ["Last observed", item.observed_at], ["Currently discovered", item.active ? "Yes" : "No"],
+        ["Reported exposure", item.exposure ?? "No value collected"],
+        ["Sensitivity", item.sensitivity ?? "No classification collected"],
+      ]) summary.append(row(label + " · " + value));
+      for (const [key, value] of Object.entries(item.facts)) {
+        summary.append(row(key.replaceAll("_", " ") + " · " + String(value)));
+      }
+      const raw = document.createElement("details");
+      const rawTitle = document.createElement("summary");
+      rawTitle.textContent = "Collected metadata and source evidence";
+      raw.append(rawTitle, metadata);
+      const relationshipTitle = document.createElement("h4");
+      relationshipTitle.textContent = "Discovered relationships";
+      const details = [heading, summary, relationshipTitle, ...relationships, raw];
+      if (item.assessment) details.push(row("Latest assessment · " + item.assessment.created_at,
+        "Open assessment", async () => {
+          const { data } = await call("/api/v1/scans/" + item.assessment.id);
+          await navigate("history");
+          showReport(data);
+        }));
+      byId("inventory-detail").replaceChildren(...details);
+    }));
+    if (user.role !== "viewer" && !asset.scope && types[asset.kind]) {
+      entry.append(row("", "Run assessment", async () => {
+        const { data: scan } = await call("/api/v1/scans", {asset: asset.id});
+        await navigate("history");
+        showReport(scan);
+      }));
     }
-    return row(asset.id + " · " + asset.kind, "Run assessment", user.role === "viewer" ? null : async () => {
-      const { data: scan } = await call("/api/v1/scans", { asset: asset.id });
-      await navigate("history");
-      showReport(scan);
-    });
+    return entry;
   });
-  if (after) entries.push(row("Inventory", "First page", () => loadInventory()));
-  if (data.next_after) entries.push(row("More assets", "Next page", () => loadInventory(data.next_after)));
+  if (!entries.length) entries.push(row("No objects collected in this set. Run its connection scan to populate inventory."));
+  if (after) entries.push(row("", "First page", () => loadInventory()));
+  if (data.next_after) entries.push(row("", "Next page", () => loadInventory(data.next_after)));
   byId("asset-list").replaceChildren(...entries);
 }
 

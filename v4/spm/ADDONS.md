@@ -664,3 +664,12 @@ The CLI equivalent is `agent.py --origin "$SPM_ORIGIN" schedule "$AGENT_ID" --mi
 Project administrators can now open **Connections** to save AWS, Google Cloud Storage, Vertex AI, Azure ML, Oracle Cloud, IBM Cloud, Salesforce, and VMware ESXi/vCenter targets. The form adapts its fields to the chosen provider. Select a server credential profile and save the connection, then choose **Test connection** or **Run scan**. Testing reads inventory without saving it. Scanning refreshes the existing inventory and posture assessments. Use **Refresh results** to check completion.
 
 A profile selects credentials available on the server. By default, collection uses the service account's configured provider identity. To use multiple identities, configure the private JSON file named by `DOOFUS_CONNECTION_PROFILES`. The console displays its profile names. File permissions must restrict access to the service account. Full examples are in the distribution's OPERATOR-REFERENCE.md. Provider tools and read permissions are required where the scan executes.
+
+
+## Select an inventory object set
+
+Open **Inventory** and choose **Which object set would you like to see?** Saved connection names, such as **My AWS account**, identify each provider scope. Sets also appear from enrolled agents and existing collections. **All inventoried objects** and **Manually entered assets** remain available.
+
+The selected set lists all collected graph objects as well as assessment-backed assets. This includes models, endpoints, identities, data stores, networks and repositories discovered by the configured provider connector. Use **Next page** to browse additional objects. **View object** shows its collected resource identity, timestamps, exposure and sensitivity fields, facts, source evidence, immediate relationships, and latest applicable assessment. An object without a supported assessment remains visible.
+
+Set contents and details are project-scoped. Empty saved connections appear before their first successful collection. Previously assessed objects that are no longer discovered remain marked accordingly. Provider information is limited to metadata retained by the connector; this view does not make additional provider API calls.

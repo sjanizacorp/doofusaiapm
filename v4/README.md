@@ -67,7 +67,7 @@ Each connector targets an explicitly configured account, project, workspace, com
 Sign in with a local username/password account or a configured Entra ID or AD FS identity. Project roles control which actions are available.
 
 - **Connections** lets administrators choose a platform, fill target fields using visible examples, select a server credential profile, test access, run a scan, and review results.
-- **Inventory** and **Scan history** show assets and assessments.
+- **Inventory** offers named account/workspace object sets and a view of every collected object, including objects without applicable assessments. Details show retained provider metadata, discovered relationships and assessment evidence. **Scan history** shows recorded assessments.
 - **Issues** provides findings, risk context, assignment, exceptions, and history.
 - **Relationships** shows declared and provider-discovered topology.
 - **Data posture** shows classifications, content sample summaries, configuration exposure paths, and matching access reviews.
@@ -195,7 +195,7 @@ The release is a candidate for controlled enterprise pilots. Production readines
 
 ## Verification
 
-The current source passed **90 automated tests** with optional ONNX and SSO parsers installed. Local checks also exercised the browser and extracted client package, including installation, account creation, sign-in, logout, backup, shutdown, and reinstall with retained data.
+The current source passed **93 automated tests** with optional ONNX and SSO parsers installed. Local checks also exercised the browser and extracted client package, including installation, account creation, sign-in, logout, backup, shutdown, and reinstall with retained data.
 
 ```sh
 cd v4/spm

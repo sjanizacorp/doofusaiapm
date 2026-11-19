@@ -36,13 +36,16 @@
 <h1 id="project"></h1><p id="identity"></p>
 <nav aria-label="Workspace"><button data-view="inventory">Inventory</button><button data-view="issues">Issues</button><button data-view="history">Scan history</button><button data-view="relationships">Relationships</button><button data-view="boms">AI bills of materials</button><button data-view="runtime">Runtime findings</button><button data-view="syncs">Cloud syncs</button><button id="connections-tab" data-view="connections" hidden>Connections</button><button id="agents-tab" data-view="agents" hidden>Agents</button><button id="data-posture-tab" data-view="data-posture" hidden>Data posture</button><button id="access-tab" data-view="access-reviews">Access reviews</button><button id="audit-tab" data-view="audit">Audit log</button><button data-view="api">API console</button></nav>
 <section id="inventory" class="panel view">
-<h2>Asset inventory</h2><p>Checks evaluate the facts entered here. Missing facts appear as unknown.</p>
+<h2>Asset inventory</h2>
+<label>Which object set would you like to see?<select id="inventory-set"></select></label>
+<p id="inventory-set-info"></p>
+<p>Open an object to inspect collected provider information, discovered relationships and its latest assessment.</p>
 <form id="asset" hidden>
 <div class="fields"><label>Asset ID<input id="asset-id" required maxlength="80" placeholder="e.g. training-store"></label>
 <label>Kind<select id="kind"><option value="storage">Model storage</option><option value="registry">Model registry</option><option value="agent">AI agent</option></select></label></div>
 <div id="facts" class="fields"></div><button>Save asset</button>
 </form>
-<div id="asset-list"></div>
+<div id="asset-list"></div><div id="inventory-detail"></div>
 </section>
 <section id="issues" class="panel view" hidden>
 <h2>Issues</h2><p>Reassess an asset after correcting its configuration to verify resolution.</p>

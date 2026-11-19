@@ -23,6 +23,7 @@ import gcs
 import agent_protocol
 import agent_registry
 import connections
+import inventory
 import local_login
 import sso_login
 import controls
@@ -1138,6 +1139,10 @@ class Product:
                 if user["expires_at"] is not None:
                     result["expires_at"] = user["expires_at"]
                 return 200, result
+            if route == "/api/v1/inventory/sets" and method == "GET":
+                return 200, {"sets": inventory.sets(conn, project)}
+            if route == "/api/v1/inventory/objects" and method == "GET":
+                return 200, inventory.objects(conn, project, url.query)
             if route == "/api/v1/assets" and method in ("GET", "POST"):
                 if method == "GET":
                     after = parse_qs(url.query, keep_blank_values=True).get("after", [""])

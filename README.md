@@ -53,7 +53,7 @@ Artifact inspection covers supported Safetensors, GGUF v3, restricted model ZIP,
 
 ## Download, install and create an administrator
 
-The client distribution runs on Linux or macOS and requires an installed **CPython 3.13** base interpreter. It contains compiled Python modules, browser assets, lifecycle scripts, plain-text instructions and illustrated PDF manuals. The installer creates a dedicated virtual environment; it does not download the base interpreter.
+The client distribution runs on Linux or macOS and requires an installed **CPython 3.13** base interpreter. The package includes the application, lifecycle controls, operating instructions and illustrated PDF manuals. The installer creates a dedicated virtual environment; it does not download the base interpreter.
 
 1. Download and extract the client ZIP. Open a terminal in the extracted folder and read `START-HERE.txt`.
 2. Run `./install.sh`. Enter a dedicated installation directory when prompted, or press Enter to accept the displayed default. For unattended installation, use `./install.sh --installdir "/path/to/DoofusAI"`.
@@ -101,8 +101,6 @@ Lifecycle scripts show progress and next-step instructions. Use the installed `b
 
 Uninstall stops the service and removes application files, controls and the virtual environment. It retains data, configuration and logs, including account hashes and other sensitive records. Protect retained files. Reinstall from an extracted package using the same installation directory to reuse that state.
 
-The source distribution also includes container and Kubernetes deployment examples, protected metrics, health checks, backup verification and recovery qualification tools. Kubernetes recovery depends on the deployment’s volume attachment and fencing behavior.
-
 ## Product manuals and demo
 
 All manuals are authored by Aniza Inc. and contain screenshots, illustrations and step-by-step instructions. Copies are included in the archive’s `manuals/` folder.
@@ -114,11 +112,9 @@ All manuals are authored by Aniza Inc. and contain screenshots, illustrations an
 - [Narrated product demo](https://github.com/sjanizacorp/doofusaiapm/releases/download/v4-client-2026-11-18/doofusai-spm-v4-demo.mp4): installation, configuration, administration and user workflows.
 - [Release files and checksums](https://github.com/sjanizacorp/doofusaiapm/releases/tag/v4-client-2026-11-18): downloads and integrity checks.
 
-The client archive excludes Markdown files, Python source, development tests and build prompts. The developer package is a separate distribution containing source, tests and the private build brief.
-
 ## Validation and current limits
 
-The source passed 103 automated tests with the optional ONNX and SSO dependencies installed. The latest lifecycle changes passed 10 lifecycle checks and an extracted-client test covering installation, startup, health, agent download, backup, shutdown, uninstall and reinstall with retained state. A 25-scenario browser regression, run against both source and installed compiled client deployments, exercises all 14 administrator tabs, role-specific views, 71 distinct button labels, server-side persistence, draft protection, delayed-response races, errors and narrow layouts. These are local and fixture-based results; identity-provider browser flows are simulated.
+Release qualification includes 103 automated product checks, 10 lifecycle checks and a 25-scenario browser audit. The browser audit covers all 14 administrator tabs, role-specific views, 71 distinct button labels, saved changes, draft protection, delayed responses, error recovery and narrow layouts. Testing used controlled environments and simulated identity providers.
 
 Live provider accounts, live identity tenants, production-scale traffic and physical-node failover require deployment-specific testing. Broader service discovery, comprehensive cross-provider access analysis, native behavioral model threat detection and wider runtime enforcement remain areas for further development. The current release is suitable for evaluation in a controlled enterprise pilot; full commercial-platform parity and production readiness have not been demonstrated.
 

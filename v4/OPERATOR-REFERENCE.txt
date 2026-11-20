@@ -97,7 +97,7 @@ The installer preserves data and configuration when reinstalling in an existing 
 
 Python compatibility
 
-Lifecycle scripts check the Python version and compiled runtime compatibility before starting. They prefer python3.13 and check standard Python 3.13 locations. If your default python3 is 3.9, 3.14, or 3.15, it will not be used for the compiled client. For a custom installation use DOOFUS_PYTHON=/path/to/python3.13 ./install.sh. An explicit incompatible override is rejected with a setup message.
+Lifecycle scripts check Python compatibility before starting. They prefer python3.13 and check standard Python 3.13 locations. If your default python3 is 3.9, 3.14, or 3.15, it will not be selected for this installation. For a custom installation use DOOFUS_PYTHON=/path/to/python3.13 ./install.sh. An explicit incompatible override is rejected with a setup message.
 
 
 Installation virtual environment

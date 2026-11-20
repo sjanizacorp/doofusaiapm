@@ -9,34 +9,179 @@ const types = {
   agent: { approval_required: "Sensitive actions require approval", redaction_enabled: "Sensitive-data redaction enabled" },
 };
 
-async function call(path, body, method = "POST") {
-  const request = { headers: { Authorization: "Bearer " + credential } };
+// A response may update the screen only while its session, view and interaction remain current.
+let viewVersion = 0;
+let interactionVersion = 0;
+let activeView = "";
+let activeActions = 0;
+let refreshing = false;
+let inventoryAfter = "";
+let dataAfter = "";
+let ruleBefore = "";
+let selectedDetail = null;
+let plannedAsset = "";
+const detailActions = new Map();
+const responseCache = new Map();
+const drafts = new Set();
+const draftEdits = new WeakMap();
+const savingElements = new Map();
+let editVersion = 0;
+let loadingView = -1;
+class StaleResponse extends Error {}
+function context() { return [credential, viewVersion, interactionVersion]; }
+function isCurrent(stamp) { return stamp[0] === credential && stamp[1] === viewVersion && stamp[2] === interactionVersion; }
+function hasDrafts() {
+  for (const element of drafts) if (!element.isConnected) drafts.delete(element);
+  return [...drafts].some((element) => element.closest(".view")?.id === activeView);
+}
+function isEditing() {
+  const element = document.activeElement;
+  return element?.matches("input:not([readonly]),textarea,select") && element.closest(".view")?.id === activeView;
+}
+function trackDraft(event) {
+  if (!event.target.closest(".view")) return;
+  editVersion++;
+  const form = event.target.closest("form");
+  if (form && !["local-session", "session", "issue-filter", "check-plan-form", "api-form"].includes(form.id)) { drafts.add(form); draftEdits.set(form, editVersion); }
+  if (event.target.closest("#agent-list") && event.target.tagName === "SELECT") {
+    const group = event.target.closest("label").parentElement; drafts.add(group); draftEdits.set(group, editVersion);
+  }
+  if (event.target.closest("#data-posture-detail") && event.target.tagName === "SELECT") {
+    const group = byId("data-posture-detail"); drafts.add(group); draftEdits.set(group, editVersion);
+  }
+}
+byId("workspace").addEventListener("input", trackDraft);
+byId("workspace").addEventListener("change", trackDraft);
+
+function protectedDrafts() {
+  hasDrafts();
+  return [...drafts].some((element) => element.closest(".view")?.id === activeView &&
+    (!savingElements.has(element) || draftEdits.get(element) > savingElements.get(element)));
+}
+async function call(path, body, method = "POST", cacheResult = true) {
+  const originalEdit = editVersion;
+  const protectsForms = body === undefined && loadingView !== viewVersion &&
+    ["/api/v1/issues", "/api/v1/data-posture", "/api/v1/agents", "/api/v1/checks"].includes(path.split("?")[0]);
+  const stamp = context();
+  const background = refreshing && activeActions === 0;
+  const request = { headers: { Authorization: "Bearer " + credential }, cache: "no-store" };
   if (body !== undefined) {
     request.method = method;
     request.headers["Content-Type"] = "application/json";
     request.body = JSON.stringify(body);
   }
-  const response = await fetch(path, request);
-  const data = await response.json();
-  if (!response.ok) throw Error(data.error);
+  let response;
+  try { response = await fetch(path, request); }
+  catch (error) {
+    if (!isCurrent(stamp)) throw new StaleResponse();
+    throw Error("Cannot reach the server. Check your connection and retry.");
+  }
+  let data;
+  try { data = await response.json(); }
+  catch (error) {
+    if (!isCurrent(stamp)) throw new StaleResponse();
+    throw Error("The server returned an unexpected response (HTTP " + response.status + "). Retry or contact your administrator.");
+  }
+  if (!isCurrent(stamp) || (background && (hasDrafts() || isEditing())) ||
+      (protectsForms && (originalEdit !== editVersion || protectedDrafts()))) throw new StaleResponse();
+  if (!response.ok) {
+    if (response.status === 401 && user) {
+      byId("auto-refresh").value = "0";
+      byId("refresh-status").textContent = "Session expired. Sign out and sign in again.";
+      throw Error("Your session expired. Sign out and sign in again.");
+    }
+    throw Error(data.error || "Request failed (HTTP " + response.status + ").");
+  }
+  if (body === undefined && cacheResult) {
+    responseCache.set(path, JSON.stringify(data));
+    if (responseCache.size > 200) responseCache.delete(responseCache.keys().next().value);
+  }
   return { status: response.status, data };
 }
 
 function perform(action) {
   return async (event) => {
     event.preventDefault();
-    byId("status").textContent = "";
+    interactionVersion++;
+    const stamp = context();
     const button = event.submitter ?? event.currentTarget;
+    const form = button.closest("form");
+    const dirtyGroups = [...drafts].filter((element) => element.contains(button) || element === form);
+    const submittedEdit = editVersion;
+    const saving = [...new Set([...dirtyGroups, ...(form ? [form] : [])])];
+    for (const element of saving) savingElements.set(element, submittedEdit);
+    const clearSubmitted = () => { for (const element of dirtyGroups) if ((draftEdits.get(element) || 0) <= submittedEdit) drafts.delete(element); };
+    byId("status").textContent = "";
     button.disabled = true;
+    activeActions++;
     try {
       await action();
+      clearSubmitted();
     } catch (error) {
-      byId("status").textContent = error.message;
+      if (error instanceof StaleResponse) clearSubmitted();
+      if (!(error instanceof StaleResponse) && stamp[0] === credential && stamp[2] === interactionVersion) byId("status").textContent = error.message;
     } finally {
       button.disabled = false;
+      for (const element of saving) savingElements.delete(element);
+      activeActions--;
     }
   };
 }
+
+function watchedPaths() {
+  const detail = selectedDetail?.view === activeView ? selectedDetail.key : "";
+  const id = detail?.slice(detail.indexOf(":") + 1);
+  const paths = {
+    inventory: ["/api/v1/inventory/sets", "/api/v1/inventory/objects?set=" + encodeURIComponent(inventorySet) + "&after=" + encodeURIComponent(inventoryAfter)],
+    issues: ["/api/v1/issues?status=" + byId("issue-status").value],
+    history: ["/api/v1/scans"], checks: ["/api/v1/checks"],
+    relationships: ["/api/v1/graph/nodes", "/api/v1/graph/edges", "/api/v1/cloud-graph"],
+    boms: ["/api/v1/boms"], runtime: ["/api/v1/runtime-findings"], syncs: ["/api/v1/sync-runs"],
+    connections: ["/api/v1/connections"], agents: ["/api/v1/agents"],
+    "data-posture": ["/api/v1/data-posture" + (dataAfter ? "?after=" + encodeURIComponent(dataAfter) : "")],
+    "access-reviews": ["/api/v1/access-reviews"], audit: ["/api/v1/audit"], api: [],
+  }[activeView] || [];
+  if (activeView === "checks" && user.role === "admin") paths.push("/api/v1/rule-packs" + (ruleBefore ? "?before=" + ruleBefore : ""), "/api/v1/rule-sources");
+  if (activeView === "connections" && detail) paths.push("/api/v1/connections/" + id + "/runs");
+  if (activeView === "agents" && detail) paths.push("/api/v1/agents/" + id + "/jobs");
+  if (activeView === "relationships" && byId("cloud-scope").value) paths.push("/api/v1/cloud-graph?scope=" + encodeURIComponent(byId("cloud-scope").value));
+  if (activeView === "access-reviews" && detail) paths.push("/api/v1/access-reviews/" + id);
+  if (activeView === "issues" && detail) paths.push("/api/v1/issues/" + id, "/api/v1/issues/" + id + "/exceptions");
+  return paths;
+}
+async function refreshView(force = false) {
+  if (!user || !activeView || refreshing || activeActions || document.hidden) return;
+  if (hasDrafts() || isEditing()) {
+    byId("refresh-status").textContent = "Updates paused while editing. Save your changes to resume.";
+    return;
+  }
+  refreshing = true;
+  const stamp = context();
+  try {
+    let changed = force;
+    for (const path of watchedPaths()) {
+      const before = responseCache.get(path);
+      const {data} = await call(path, undefined, "POST", false);
+      if (before !== JSON.stringify(data)) changed = true;
+    }
+    if (!isCurrent(stamp) || hasDrafts() || isEditing()) return;
+    if (changed) await navigate(activeView, true);
+    if (isCurrent(stamp)) byId("refresh-status").textContent = "Last checked " + new Date().toLocaleTimeString();
+  } catch (error) {
+    if (!(error instanceof StaleResponse) && isCurrent(stamp)) byId("refresh-status").textContent = "Refresh failed: " + error.message + " Your current view is retained.";
+  } finally { refreshing = false; }
+}
+byId("refresh-view").onclick = async () => {
+  const button = byId("refresh-view"); button.disabled = true;
+  try { await refreshView(true); }
+  catch (error) { byId("refresh-status").textContent = error.message; }
+  finally { button.disabled = false; }
+};
+let lastRefresh = 0;
+setInterval(() => {
+  const seconds = Number(byId("auto-refresh").value);
+  if (seconds && Date.now() - lastRefresh >= seconds * 1000) { lastRefresh = Date.now(); refreshView(); }
+}, 1000);
 
 function fillFacts() {
   const fields = Object.entries(types[byId("kind").value]).map(([key, name]) => {
@@ -53,7 +198,7 @@ function fillFacts() {
   byId("facts").replaceChildren(...fields);
 }
 
-function row(text, label, action) {
+function row(text, label, action, detailKey = null) {
   const entry = document.createElement("div");
   entry.className = "entry";
   const summary = document.createElement("span");
@@ -62,7 +207,11 @@ function row(text, label, action) {
   if (action) {
     const button = document.createElement("button");
     button.textContent = label;
-    button.onclick = perform(action);
+    if (detailKey) detailActions.set(detailKey, action);
+    button.onclick = perform(async () => {
+      if (detailKey) selectedDetail = {view: activeView, key: detailKey};
+      await action();
+    });
     entry.append(button);
   }
   return entry;
@@ -147,6 +296,7 @@ async function loadConnections() {
   if (data.profiles.includes(previous)) select.value = previous;
   byId("connection-help").textContent = data.requirements[byId("connection-provider").value];
   async function history(connection) {
+    selectedDetail = {view: "connections", key: "connection:" + connection.id};
     const { data } = await call("/api/v1/connections/" + connection.id + "/runs");
     byId("connection-runs").replaceChildren(row(connection.name + " results"),
       ...data.runs.map((run) => row([run.mode, run.status, run.created_at,
@@ -164,7 +314,7 @@ async function loadConnections() {
         await history(connection);
       }));
     }
-    group.append(row("", "Refresh results", () => history(connection)));
+    group.append(row("", "Refresh results", () => history(connection), "connection:" + connection.id));
     group.append(row("", "Remove connection", async () => {
       if (!window.confirm("Remove this saved connection? Collected inventory is retained.")) return;
       await call(path, {}, "DELETE");
@@ -173,6 +323,9 @@ async function loadConnections() {
     return group;
   }));
   if (!data.connections.length) byId("connection-list").textContent = "No connections configured.";
+  if (selectedDetail?.view === "connections" && !data.connections.some((item) => "connection:" + item.id === selectedDetail.key)) {
+    selectedDetail = null; byId("connection-runs").replaceChildren();
+  }
 }
 
 function revealAgentToken(token) {
@@ -191,6 +344,7 @@ async function loadAgents() {
     const group = document.createElement("div");
     const path = "/api/v1/agents/" + encodeURIComponent(agent.id);
     async function jobs() {
+      selectedDetail = {view: "agents", key: "agent:" + agent.id};
       const { data } = await call(path + "/jobs");
       byId("agent-jobs").replaceChildren(row(agent.name + " collections"),
         ...data.jobs.map((job) => row([job.created_at, job.status, job.id].join(" · "))));
@@ -198,7 +352,7 @@ async function loadAgents() {
     group.append(row([agent.name, agent.provider, agent.scope,
       agent.revoked_at ? "Revoked" : "Credential expires " + agent.expires_at,
       agent.last_seen ? "Last seen " + agent.last_seen : "Awaiting first check-in",
-    ].join(" · "), "Run history", jobs));
+    ].join(" · "), "Run history", jobs, "agent:" + agent.id));
     if (!agent.revoked_at) {
       const schedule = document.createElement("label");
       schedule.textContent = "Collection frequency";
@@ -253,7 +407,12 @@ byId("agent-enroll").onsubmit = perform(async () => {
   await loadAgents();
 });
 byId("agent-hide").onclick = () => revealAgentToken("");
-byId("agent-copy").onclick = perform(() => navigator.clipboard.writeText(byId("agent-token").value));
+byId("agent-copy").onclick = perform(async () => {
+  if (!navigator.clipboard) throw Error("Clipboard access is unavailable. Select and copy the credential manually.");
+  try { await navigator.clipboard.writeText(byId("agent-token").value); }
+  catch (error) { throw Error("Clipboard permission was denied. Select and copy the credential manually."); }
+  byId("status").textContent = "Credential copied. Store it securely, then clear the display.";
+});
 byId("agent-package").onclick = perform(async () => {
   const response = await fetch("/api/v1/agents/package", {headers: {Authorization: "Bearer " + credential}});
   if (!response.ok) throw Error("Collector bundle could not be downloaded.");
@@ -266,6 +425,7 @@ byId("agent-package").onclick = perform(async () => {
 });
 
 async function loadDataPosture(after = "") {
+  dataAfter = after;
   const { data } = await call("/api/v1/data-posture" + (after ? "?after=" + encodeURIComponent(after) : ""));
   const list = byId("data-posture-list");
   const detail = byId("data-posture-detail");
@@ -291,6 +451,7 @@ async function loadDataPosture(after = "") {
     const save = row("", "Save classification", async () => {
       await call("/api/v1/data-posture", { node: item.id, sensitivity: sensitivity.value });
       await loadDataPosture(after);
+      await detailActions.get("data:" + item.id)?.();
       byId("status").textContent = "Classification saved.";
     });
     const evidence = item.access_evidence.flatMap((review) => review.decisions.map((decision) =>
@@ -304,7 +465,7 @@ async function loadDataPosture(after = "") {
       ...Object.entries(sample.signals).map(([kind, count]) => kind + " × " + count),
     ].join(" · ")));
     detail.replaceChildren(heading, label, save, ...evidence);
-  }));
+  }, "data:" + item.id));
   if (!entries.length) entries.push(row("No discovered data nodes on this page."));
   if (after) entries.push(row("", "First page", () => loadDataPosture()));
   if (data.next_after) entries.push(row("", "Next page", () => loadDataPosture(data.next_after)));
@@ -313,8 +474,8 @@ async function loadDataPosture(after = "") {
 
 async function showAccessReview(id) {
   const { data } = await call("/api/v1/access-reviews/" + id);
-  const mode = {aws: "AWS policy simulation", vsphere: "vCenter privilege check",
-                gcs: "Cloud Storage caller permissions"}[data.provider];
+  const mode = {"aws-iam-policy-simulation": "AWS policy simulation", "vcenter-privilege-check": "vCenter privilege check",
+    "google-iam-policy-troubleshooter": "Google IAM Policy Troubleshooter", "google-storage-caller-permissions": "Cloud Storage caller permissions"}[data.mode] || data.provider;
   const heading = document.createElement("h3");
   heading.textContent = mode;
   const subject = document.createElement("p");
@@ -461,6 +622,7 @@ async function loadIssues() {
           form.onsubmit = perform(async () => {
             await call("/api/v1/issues/" + issue.id + "/assignment", { assignee: field.value.trim() || null });
             await loadIssues();
+            await detailActions.get("issue:" + issue.id)?.();
           });
           controls.push(form);
           const exceptionForm = document.createElement("form");
@@ -485,6 +647,7 @@ async function loadIssues() {
               reason: reason.value, expires_at: new Date(expires.value).toISOString(),
             });
             await loadIssues();
+            await detailActions.get("issue:" + issue.id)?.();
           });
           if (!detail.issue.active_exception) controls.push(exceptionForm);
           else {
@@ -494,6 +657,7 @@ async function loadIssues() {
               await call("/api/v1/issues/" + issue.id + "/exceptions",
                 { id: detail.issue.active_exception.id }, "DELETE");
               await loadIssues();
+            await detailActions.get("issue:" + issue.id)?.();
             });
             controls.push(revoke);
           }
@@ -504,7 +668,7 @@ async function loadIssues() {
             await navigate("history");
             showReport(scan);
           })));
-      })));
+      }, "issue:" + issue.id)));
   if (data.issues.length === 0) {
     byId("issue-list").textContent = "No " + status + " issues.";
   }
@@ -517,6 +681,7 @@ byId("inventory-set").onchange = perform(async () => {
   await loadInventory();
 });
 async function loadInventory(after = "") {
+  inventoryAfter = after;
   const request = ++inventoryRequest;
   const { data: choices } = await call("/api/v1/inventory/sets");
   if (request !== inventoryRequest) return;
@@ -580,7 +745,7 @@ async function loadInventory(after = "") {
           showReport(data);
         }));
       byId("inventory-detail").replaceChildren(...details);
-    }));
+    }, "object:" + asset.id));
     if (user.role !== "viewer" && !asset.scope && types[asset.kind]) {
       entry.append(row("", "Run assessment", async () => {
         const { data: scan } = await call("/api/v1/scans", {asset: asset.id});
@@ -596,20 +761,35 @@ async function loadInventory(after = "") {
   byId("asset-list").replaceChildren(...entries);
 }
 
-async function navigate(view) {
+async function navigate(view, refresh = false) {
+  if (!refresh) {
+    viewVersion++;
+    selectedDetail = null;
+    detailActions.clear();
+    activeView = view;
+    loadingView = viewVersion;
+  }
+  const stamp = context();
+  const selected = refresh ? selectedDetail : null;
+  if (refresh) detailActions.clear();
+  const panel = byId(view);
+  panel.setAttribute("aria-busy", "true");
+  byId("refresh-status").textContent = "Loading " + document.querySelector('[data-view="' + view + '"]').textContent + "…";
+  try {
   for (const panel of document.querySelectorAll(".view")) panel.hidden = panel.id !== view;
   for (const tab of document.querySelectorAll("[data-view]")) {
     if (tab.dataset.view === view) tab.setAttribute("aria-current", "page");
     else tab.removeAttribute("aria-current");
   }
-  if (view === "inventory") await loadInventory();
-  if (view === "checks") await loadChecks();
+  if (view === "inventory") await loadInventory(refresh ? inventoryAfter : "");
+  if (view === "checks") await loadChecks(refresh ? ruleBefore : "");
   if (view === "history") {
     const { data } = await call("/api/v1/scans");
     byId("report").replaceChildren();
     byId("scan-list").replaceChildren(...data.scans.map((scan) =>
       row((scan.bucket_name ?? scan.asset) + " · " + scan.created_at + " UTC · " + scan.result.coverage, "Open report",
-        async () => showReport((await call("/api/v1/scans/" + scan.id)).data))));
+        async () => showReport((await call("/api/v1/scans/" + scan.id)).data), "scan:" + scan.id)));
+    if (!data.scans.length) byId("scan-list").textContent = "No assessments recorded. Run a connection scan or assess a manual asset.";
   }
   if (view === "issues") await loadIssues();
   if (view === "syncs") {
@@ -623,8 +803,9 @@ async function navigate(view) {
   if (view === "connections") await loadConnections();
   if (view === "agents") await loadAgents();
   else revealAgentToken("");
-  if (view === "data-posture") await loadDataPosture();
+  if (view === "data-posture") await loadDataPosture(refresh ? dataAfter : "");
   if (view === "relationships") {
+    const previousScope = byId("cloud-scope").value;
     const [inventory, graph, cloud] = await Promise.all([
       call("/api/v1/graph/nodes"), call("/api/v1/graph/edges"), call("/api/v1/cloud-graph"),
     ]);
@@ -637,6 +818,7 @@ async function navigate(view) {
     const select = byId("cloud-scope");
     area.hidden = !cloud.data.scopes.length;
     select.replaceChildren(...cloud.data.scopes.map((scope) => new Option(scope, scope)));
+    if (cloud.data.scopes.includes(previousScope)) select.value = previousScope;
     function showCloud(data) {
       const names = new Map(data.nodes.map((node) => [node.id, node.name]));
       byId("cloud-list").replaceChildren(
@@ -645,7 +827,7 @@ async function navigate(view) {
         ...data.edges.map((edge) => row(names.get(edge.origin) + " → " + edge.relation + " → " + names.get(edge.target))),
       );
     }
-    showCloud(cloud.data);
+    showCloud(select.value && select.value !== cloud.data.scope ? (await call("/api/v1/cloud-graph?scope=" + encodeURIComponent(select.value))).data : cloud.data);
     select.onchange = perform(async () => {
       const { data } = await call("/api/v1/cloud-graph?scope=" + encodeURIComponent(select.value));
       showCloud(data);
@@ -666,7 +848,7 @@ async function navigate(view) {
         byId("bom-detail").replaceChildren(heading, notes, ...detail.document.components.slice(0, 200).map(
           (item) => row([item.name, item.type, item.version, item.purl].filter(Boolean).join(" · "))
         ));
-      },
+      }, "bom:" + entry.id,
     )));
     if (!data.boms.length) byId("bom-list").textContent = "No bills of materials imported.";
   }
@@ -681,14 +863,25 @@ async function navigate(view) {
     const { data } = await call("/api/v1/audit");
     byId("events").replaceChildren(...data.events.map((event) =>
       row([event.created_at + " UTC", event.principal, event.action, event.resource].join(" · "))));
+    if (!data.events.length) byId("events").textContent = "No audit events recorded.";
   }
   if (view === "access-reviews") {
     const { data } = await call("/api/v1/access-reviews");
     byId("access-detail").replaceChildren();
     byId("access-list").replaceChildren(...data.reviews.map((entry) =>
       row(entry.provider + " · " + entry.principal + " · " + entry.resource + " · " + entry.evaluated_at,
-        "View decisions", () => showAccessReview(entry.id))));
+        "View decisions", () => showAccessReview(entry.id), "review:" + entry.id)));
     if (data.reviews.length === 0) byId("access-list").textContent = "No access reviews recorded.";
+  }
+  if (selected && isCurrent(stamp)) {
+    const restore = detailActions.get(selected.key);
+    if (restore) { selectedDetail = selected; await restore(); }
+    else selectedDetail = null;
+  }
+  if (isCurrent(stamp)) byId("refresh-status").textContent = "Last checked " + new Date().toLocaleTimeString();
+  } finally {
+    if (isCurrent(stamp) || activeView !== view) panel.removeAttribute("aria-busy");
+    if (loadingView === stamp[1]) loadingView = -1;
   }
 }
 
@@ -696,9 +889,13 @@ for (const tab of document.querySelectorAll("[data-view]")) {
   tab.onclick = perform(() => navigate(tab.dataset.view));
 }
 async function openProject(accessToken) {
+  if (credential !== accessToken) responseCache.clear();
   credential = accessToken;
   const { data } = await call("/api/v1/me");
   user = data;
+  const endpoints = ["/api/v1/me", "/api/v1/assets", "/api/v1/scans", "/api/v1/issues", "/api/v1/checks"];
+  if (user.role === "admin") endpoints.push("/api/v1/audit");
+  byId("endpoint").replaceChildren(...endpoints.map((path) => new Option(path, path)));
   byId("token").value = "";
   byId("project").textContent = user.project;
   byId("identity").textContent = user.principal + " · " + user.role;
@@ -795,8 +992,8 @@ byId("cancel-device").onclick = perform(async () => {
 });
 
 byId("logout").onclick = perform(async () => {
-  await call("/api/v1/session/logout", {});
-  location.reload();
+  try { await call("/api/v1/session/logout", {}); }
+  finally { credential = ""; user = null; location.reload(); }
 });
 byId("kind").onchange = fillFacts;
 fillFacts();
@@ -810,6 +1007,7 @@ byId("asset").onsubmit = perform(async () => {
   await call("/api/v1/assets", { id: byId("asset-id").value, kind: byId("kind").value, facts });
   await navigate("inventory");
 });
+byId("endpoint").onchange = () => { byId("response").hidden = true; byId("response").textContent = ""; };
 byId("api-form").onsubmit = perform(async () => {
   const output = byId("response");
   output.hidden = true;
@@ -858,7 +1056,8 @@ function renderChecks() {
     return detail;
   }));
 }
-async function loadChecks() {
+async function loadChecks(before = "") {
+  const previousChecks = JSON.stringify(checkRows);
   const {data} = await call("/api/v1/checks");
   checkRows = data.checks;
   const selected = byId("check-kind-filter").value;
@@ -873,11 +1072,13 @@ async function loadChecks() {
   byId("check-admin").hidden = user.role !== "admin";
   renderChecks();
   if (user.role === "admin") {
-    await loadRulePacks();
+    await loadRulePacks(before);
     await loadRuleSources();
   }
+  if (plannedAsset && previousChecks !== JSON.stringify(checkRows)) await showPlan(plannedAsset);
 }
 async function loadRulePacks(before = "") {
+  ruleBefore = before;
   const {data: packs} = await call("/api/v1/rule-packs" + (before ? "?before=" + before : ""));
     byId("pack-list").replaceChildren(...packs.packs.map((p) => {
       const entry = document.createElement("div");
@@ -915,11 +1116,13 @@ async function loadRuleSources() {
 }
 byId("check-search").oninput = renderChecks;
 byId("check-kind-filter").onchange = renderChecks;
-byId("check-plan-form").onsubmit = perform(async () => {
-  const {data} = await call("/api/v1/checks/plan", {asset: byId("check-plan-asset").value});
-  byId("check-plan-result").replaceChildren(row("Planned rule-set SHA256: " + data.policy_version),
+async function showPlan(asset) {
+  const {data} = await call("/api/v1/checks/plan", {asset});
+  plannedAsset = asset;
+  byId("check-plan-result").replaceChildren(row("Plan for " + asset + " · rule-set SHA256: " + data.policy_version),
     ...data.plan.map((r) => row(r.id + " · revision " + r.version + " · " + r.status + " · " + r.reason)));
-});
+}
+byId("check-plan-form").onsubmit = perform(() => showPlan(byId("check-plan-asset").value));
 byId("custom-check-form").onsubmit = perform(async () => {
   const value = (id) => byId("custom-" + id).value;
   const pack = {schema: "doofusai.rules.v1", id: value("pack"), version: Number(value("version")), rules: [{

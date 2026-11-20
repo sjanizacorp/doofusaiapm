@@ -73,6 +73,12 @@ Connect a platform and run your first scan
 4. Choose **Run scan** and refresh the operation results. Scanning saves supported inventory and assessments; tool, permission and authentication failures appear in operation history.
 5. Open **Inventory**, choose the connection’s object set and inspect assets. Use **Relationships**, **Issues**, **Data posture**, **Access reviews** and **Scan history** to investigate available evidence and follow-up work.
 
+Keep the console current
+
+Data views check for updates every five seconds by default. Choose 15 or 30 seconds, pause updates, or use **Refresh current view**. The console preserves account object sets, pages, relationship scopes and selected details when they remain available. Connection results and selected agent job histories update in place. The API console continues to run requests explicitly.
+
+Updates pause while you edit or have unsaved form changes. Requests from an earlier view or selection cannot overwrite a newer screen. Network and proxy failures retain the current view with a readable error, and sign-out remains available after session expiry. Automatic refresh reads stored evidence; it does not start provider scans.
+
 Browse, customize and update checks
 
 Open **Checks & policies** to search the 19 shipped posture checks and inspect their applicability, expected values, evidence requirements, remediation, reference links and revision. Plan a scan for an existing asset before running it. New scan reports preserve the configured catalogue digest and an execution record showing evaluated, skipped and disabled rules; missing or incompatible evidence is unknown.
@@ -112,7 +118,7 @@ The client archive excludes Markdown files, Python source, development tests and
 
 Validation and current limits
 
-The source passed 103 automated tests with the optional ONNX and SSO dependencies installed. The latest lifecycle changes passed 10 lifecycle checks and an extracted-client test covering installation, startup, health, agent download, backup, shutdown, uninstall and reinstall with retained state. These are local and fixture-based results.
+The source passed 103 automated tests with the optional ONNX and SSO dependencies installed. The latest lifecycle changes passed 10 lifecycle checks and an extracted-client test covering installation, startup, health, agent download, backup, shutdown, uninstall and reinstall with retained state. A 25-scenario browser regression, run against both source and installed compiled client deployments, exercises all 14 administrator tabs, role-specific views, 71 distinct button labels, server-side persistence, draft protection, delayed-response races, errors and narrow layouts. These are local and fixture-based results; identity-provider browser flows are simulated.
 
 Live provider accounts, live identity tenants, production-scale traffic and physical-node failover require deployment-specific testing. Broader service discovery, comprehensive cross-provider access analysis, native behavioral model threat detection and wider runtime enforcement remain areas for further development. The current release is suitable for evaluation in a controlled enterprise pilot; full commercial-platform parity and production readiness have not been demonstrated.
 
